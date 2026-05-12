@@ -1,3 +1,6 @@
+#![deny(warnings)]
+#![warn(clippy::pedantic)]
+
 use std::{path::PathBuf, process, time::Instant};
 
 use clap::Parser;
