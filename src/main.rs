@@ -15,7 +15,7 @@ mod walker;
 use output::{print_match, print_summary};
 use parser::parse_file;
 use query::{compile_query, extract_matches};
-use types::MatchResult;
+use types::{AppError, MatchResult};
 use walker::walk_rust_files;
 
 #[derive(Parser, Debug)]
@@ -38,7 +38,7 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.lang != "rust" {
-        eprintln!("error: only rust is supported in the MVP");
+        eprintln!("error: {}", AppError::LanguageNotSupported(cli.lang));
         process::exit(1);
     }
 
@@ -58,11 +58,15 @@ fn main() {
         .fold(
             || (Vec::<MatchResult>::new(), 0usize),
             |mut acc, path| {
-                if let Some((tree, source)) = parse_file(&path) {
-                    let file_path = path.to_string_lossy().into_owned();
-                    let matches = extract_matches(&tree, &source, query.as_ref(), &file_path);
-                    acc.0.extend(matches);
-                    acc.1 += 1;
+                match parse_file(&path) {
+                    Ok((tree, source)) => {
+                        let matches = extract_matches(&tree, &source, query.as_ref(), &path);
+                        acc.0.extend(matches);
+                        acc.1 += 1;
+                    }
+                    Err(error) => {
+                        eprintln!("warning: {}", error);
+                    }
                 }
 
                 acc
@@ -77,15 +81,7 @@ fn main() {
             },
         );
 
-    results.sort_by(|left, right| {
-        left.file_path
-            .cmp(&right.file_path)
-            .then(left.start_line.cmp(&right.start_line))
-            .then(left.start_col.cmp(&right.start_col))
-            .then(left.capture_name.cmp(&right.capture_name))
-            .then(left.end_line.cmp(&right.end_line))
-            .then(left.end_col.cmp(&right.end_col))
-    });
+    results.sort();
 
     for result in &results {
         print_match(result);

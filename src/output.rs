@@ -3,7 +3,7 @@ use crate::types::MatchResult;
 pub fn print_match(result: &MatchResult) {
     println!(
         "{}:{}:{}  [@{}]  {:?}",
-        result.file_path,
+        result.file_path.display(),
         result.start_line,
         result.start_col,
         result.capture_name,

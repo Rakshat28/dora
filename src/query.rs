@@ -1,18 +1,20 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use tree_sitter::{Query, QueryCursor, Tree};
 
-use crate::types::MatchResult;
+use crate::types::{AppError, MatchResult, Result};
 
-pub fn compile_query(language: &tree_sitter::Language, query_source: &str) -> Result<Arc<Query>, tree_sitter::QueryError> {
-    Query::new(language, query_source).map(Arc::new)
+pub fn compile_query(language: &tree_sitter::Language, query_source: &str) -> Result<Arc<Query>> {
+    Query::new(language, query_source)
+        .map(Arc::new)
+        .map_err(|error| AppError::QueryCompileError(error.to_string()))
 }
 
 pub fn extract_matches(
     tree: &Tree,
     source: &str,
     query: &Query,
-    file_path: &str,
+    file_path: &Path,
 ) -> Vec<MatchResult> {
     let mut cursor = QueryCursor::new();
     let root_node = tree.root_node();
@@ -31,7 +33,7 @@ pub fn extract_matches(
             let end_position = node.end_position();
 
             results.push(MatchResult {
-                file_path: file_path.to_string(),
+                file_path: file_path.to_path_buf(),
                 capture_name: capture_name.to_string(),
                 matched_text,
                 start_line: start_position.row + 1,
