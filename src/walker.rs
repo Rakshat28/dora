@@ -25,11 +25,11 @@ const EXCLUDED_DIRS: &[&str] = &[
 fn is_excluded_dir(entry: &DirEntry) -> bool {
     entry
         .file_type()
-        .map_or(false, |ft| ft.is_dir())
+        .is_some_and(|ft| ft.is_dir())
         && entry
             .file_name()
             .to_str()
-            .map_or(false, |name| EXCLUDED_DIRS.contains(&name))
+            .is_some_and(|name| EXCLUDED_DIRS.contains(&name))
 }
 
 fn is_binary(path: &Path) -> bool {
@@ -53,6 +53,7 @@ fn is_binary(path: &Path) -> bool {
     std::str::from_utf8(sample).is_err()
 }
 
+#[must_use]
 pub fn extensions_for_language(lang: &Language) -> &'static [&'static str] {
     match lang {
         Language::Rust => &["rs"],
@@ -78,13 +79,12 @@ pub fn build_walker(root: &Path, lang: &Language) -> impl Iterator<Item = Result
         .filter_map(move |result| match result {
             Err(error) => Some(Err(AppError::WalkError(error))),
             Ok(entry) => {
-                let is_file = entry.file_type().map_or(false, |ft| ft.is_file());
+                let is_file = entry.file_type().is_some_and(|ft| ft.is_file());
                 let ext_matches = entry
                     .path()
                     .extension()
                     .and_then(|extension| extension.to_str())
-                    .map(|extension| extensions.contains(&extension.to_lowercase().as_str()))
-                    .unwrap_or(false);
+                    .is_some_and(|extension| extensions.contains(&extension.to_lowercase().as_str()));
 
                 if is_file && ext_matches && !is_binary(entry.path()) {
                     Some(Ok(entry))

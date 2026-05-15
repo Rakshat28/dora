@@ -13,9 +13,9 @@ mod types;
 pub mod walker;
 
 use output::{print_match, print_summary};
-use parser::parse_file;
+use parser::{get_language, parse_file};
 use query::{compile_query, extract_matches};
-use types::{AppError, Language, MatchResult};
+use types::{Language, MatchResult};
 use walker::build_walker;
 
 #[derive(Parser, Debug)]
@@ -37,16 +37,17 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    if cli.lang != "rust" {
-        eprintln!("error: {}", AppError::LanguageNotSupported(cli.lang));
-        process::exit(1);
-    }
-
-    let language = tree_sitter_rust::language();
+    let language = match get_language(&cli.lang) {
+        Ok(language) => language,
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    };
     let query = match compile_query(&language, &cli.query) {
         Ok(query) => query,
         Err(error) => {
-            eprintln!("error: failed to compile query: {}", error);
+            eprintln!("error: failed to compile query: {error}");
             process::exit(1);
         }
     };
@@ -66,11 +67,11 @@ fn main() {
                             acc.1 += 1;
                         }
                         Err(error) => {
-                            eprintln!("warning: {}", error);
+                            eprintln!("warning: {error}");
                         }
                     },
                     Err(error) => {
-                        eprintln!("warning: {}", error);
+                        eprintln!("warning: {error}");
                     }
                 }
 

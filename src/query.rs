@@ -4,12 +4,17 @@ use tree_sitter::{Query, QueryCursor, Tree};
 
 use crate::types::{AppError, MatchResult, Result};
 
+/// Compiles a Tree-sitter query for the provided language.
+///
+/// # Errors
+/// Returns `AppError::QueryCompileError` when the query text is invalid.
 pub fn compile_query(language: &tree_sitter::Language, query_source: &str) -> Result<Arc<Query>> {
     Query::new(language, query_source)
         .map(Arc::new)
         .map_err(|error| AppError::QueryCompileError(error.to_string()))
 }
 
+#[must_use]
 pub fn extract_matches(
     tree: &Tree,
     source: &str,
