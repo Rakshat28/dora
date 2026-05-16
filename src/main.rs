@@ -270,6 +270,7 @@ mod tests {
     use crate::types::Language;
     use std::path::PathBuf;
     use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_format_file_error_walker_known_path() {
@@ -443,5 +444,141 @@ mod tests {
         let err = resolve_lang("cobol").unwrap_err();
         assert!(err.contains("cobol"));
         assert!(err.contains("rust"));
+    }
+
+    #[test]
+    fn test_instant_is_monotonically_non_decreasing() {
+        let before = Instant::now();
+        std::thread::sleep(Duration::from_millis(1));
+        let after = Instant::now();
+        assert!(after > before);
+        assert!(after.duration_since(before) >= Duration::from_millis(1));
+    }
+
+    #[test]
+    fn test_elapsed_duration_is_non_negative() {
+        let start = Instant::now();
+        let elapsed = start.elapsed();
+        assert!(elapsed.as_millis() <= 10_000);
+    }
+
+    #[test]
+    fn test_duration_as_millis_truncates_not_rounds() {
+        let d1 = Duration::from_micros(999);
+        let d2 = Duration::from_micros(1000);
+        let d3 = Duration::from_micros(1999);
+        let d4 = Duration::from_micros(2000);
+
+        assert_eq!(d1.as_millis(), 0);
+        assert_eq!(d2.as_millis(), 1);
+        assert_eq!(d3.as_millis(), 1);
+        assert_eq!(d4.as_millis(), 2);
+    }
+
+    #[test]
+    fn test_sort_then_dedup_combined_behavior() {
+        let mut results = vec![];
+
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 5,
+            start_col: 0,
+            end_line: 5,
+            end_col: 3,
+            capture_name: "cap".to_string(),
+            matched_text: "txt".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "cap".to_string(),
+            matched_text: "txt".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "cap".to_string(),
+            matched_text: "txt".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 3,
+            start_col: 0,
+            end_line: 3,
+            end_col: 3,
+            capture_name: "cap".to_string(),
+            matched_text: "txt".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/b.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "cap".to_string(),
+            matched_text: "txt".to_string(),
+        });
+
+        results.sort();
+        results.dedup();
+
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0].file_path, PathBuf::from("src/a.rs"));
+        assert_eq!(results[0].start_line, 1);
+        assert_eq!(results[1].file_path, PathBuf::from("src/a.rs"));
+        assert_eq!(results[1].start_line, 3);
+        assert_eq!(results[2].file_path, PathBuf::from("src/a.rs"));
+        assert_eq!(results[2].start_line, 5);
+        assert_eq!(results[3].file_path, PathBuf::from("src/b.rs"));
+        assert_eq!(results[3].start_line, 1);
+    }
+
+    #[test]
+    fn test_sort_dedup_idempotent() {
+        let mut results = vec![];
+
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/b.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "x".to_string(),
+            matched_text: "x".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "a".to_string(),
+            matched_text: "a".to_string(),
+        });
+        results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 3,
+            capture_name: "a".to_string(),
+            matched_text: "a".to_string(),
+        });
+
+        results.sort();
+        results.dedup();
+        let after_first = results.clone();
+
+        results.sort();
+        results.dedup();
+        let after_second = results.clone();
+
+        assert_eq!(after_first, after_second);
     }
 }
