@@ -9,7 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use rayon::prelude::*;
 
 mod output;
@@ -75,6 +76,7 @@ struct Cli {
     #[arg(
         short = 'q',
         long = "query",
+        default_value = "",
         value_name = "S-EXPR",
         help = "Tree-sitter S-expression query pattern (required)",
         long_help = "An S-expression structural query in Tree-sitter syntax.\n\n\
@@ -127,6 +129,14 @@ struct Cli {
         help = "Print detailed performance statistics to stderr after the search"
     )]
     stats: bool,
+
+    #[arg(
+        long = "generate-completions",
+        value_name = "SHELL",
+        hide = true,
+        help = "Generate shell completion script for the specified shell"
+    )]
+    generate_completions: Option<Shell>,
 }
 
 struct SearchOutcome {
@@ -139,29 +149,48 @@ struct SearchOutcome {
 
 impl Cli {
     fn validate(&self) -> std::result::Result<(), String> {
-        if !self.path.exists() {
-            return Err(format!("path does not exist: {}", self.path.display()));
+        if self.generate_completions.is_some() {
+            return Ok(());
         }
-        if !self.path.is_dir() {
-            return Err(format!("path is not a directory: {}", self.path.display()));
-        }
+
         if self.query.trim().is_empty() {
-            return Err(format!("query must not be empty: {:?}", self.query));
+            return Err("query must not be empty".to_string());
         }
+
+        if !self.path.exists() {
+            return Err(format!(
+                "path does not exist: {}\n  hint: check for typos or run from the correct directory",
+                self.path.display()
+            ));
+        }
+
+        if !self.path.is_dir() {
+            return Err(format!(
+                "path is not a directory: {}\n  hint: --path must point to a directory, not a file",
+                self.path.display()
+            ));
+        }
+
+        let supported = ["rust", "python", "js", "ts", "go"];
+        if !supported.contains(&self.lang.as_str()) {
+            return Err(format!(
+                "unsupported language: '{}'\n  supported languages: rust, python, js, ts, go\n  example: --lang rust",
+                self.lang
+            ));
+        }
+
         Ok(())
     }
 }
 
-fn resolve_lang(lang_str: &str) -> std::result::Result<Language, String> {
+fn resolve_lang(lang_str: &str) -> Language {
     match lang_str {
-        "rust" => Ok(Language::Rust),
-        "python" => Ok(Language::Python),
-        "js" => Ok(Language::JavaScript),
-        "ts" => Ok(Language::TypeScript),
-        "go" => Ok(Language::Go),
-        other => {
-            Err(format!("unsupported language '{other}'; supported: rust, python, js, ts, go"))
-        }
+        "rust" => Language::Rust,
+        "python" => Language::Python,
+        "js" => Language::JavaScript,
+        "ts" => Language::TypeScript,
+        "go" => Language::Go,
+        _ => unreachable!("validate() should have rejected lang: {}", lang_str),
     }
 }
 
@@ -327,6 +356,12 @@ fn run_search(
 fn main() {
     let cli = Cli::parse();
 
+    if let Some(shell) = cli.generate_completions {
+        let mut cmd = Cli::command();
+        generate(shell, &mut cmd, "ast-search", &mut std::io::stdout());
+        process::exit(0);
+    }
+
     let color = resolve_color_mode(cli.no_color);
 
     if let Err(message) = cli.validate() {
@@ -334,13 +369,7 @@ fn main() {
         process::exit(1);
     }
 
-    let walker_lang = match resolve_lang(&cli.lang) {
-        Ok(lang) => lang,
-        Err(message) => {
-            eprintln!("error: {message}");
-            process::exit(1);
-        }
-    };
+    let walker_lang = resolve_lang(&cli.lang);
 
     let ts_lang = match get_ts_language(&cli.lang) {
         Ok(lang) => lang,
@@ -401,6 +430,7 @@ mod tests {
         format_file_error, handle_file_error, resolve_lang, Cli, FileError, SearchOutcome,
     };
     use crate::types::Language;
+    use clap_complete::Shell;
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -501,6 +531,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         assert!(cli.validate().is_ok());
     }
@@ -514,6 +545,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -534,6 +566,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -550,37 +583,21 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         let result = cli.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
-        assert!(err_msg.contains("empty"));
+        assert_eq!(err_msg, "query must not be empty");
     }
 
     #[test]
     fn test_resolve_lang_all_supported() {
-        assert!(resolve_lang("rust").is_ok());
-        assert!(resolve_lang("python").is_ok());
-        assert!(resolve_lang("js").is_ok());
-        assert!(resolve_lang("ts").is_ok());
-        assert!(resolve_lang("go").is_ok());
-
-        assert_eq!(resolve_lang("rust").unwrap(), Language::Rust);
-        assert_eq!(resolve_lang("python").unwrap(), Language::Python);
-        assert_eq!(resolve_lang("js").unwrap(), Language::JavaScript);
-        assert_eq!(resolve_lang("ts").unwrap(), Language::TypeScript);
-        assert_eq!(resolve_lang("go").unwrap(), Language::Go);
-    }
-
-    #[test]
-    fn test_resolve_lang_unsupported() {
-        assert!(resolve_lang("cobol").is_err());
-        assert!(resolve_lang("").is_err());
-        assert!(resolve_lang("RUST").is_err());
-
-        let err = resolve_lang("cobol").unwrap_err();
-        assert!(err.contains("cobol"));
-        assert!(err.contains("rust"));
+        assert_eq!(resolve_lang("rust"), Language::Rust);
+        assert_eq!(resolve_lang("python"), Language::Python);
+        assert_eq!(resolve_lang("js"), Language::JavaScript);
+        assert_eq!(resolve_lang("ts"), Language::TypeScript);
+        assert_eq!(resolve_lang("go"), Language::Go);
     }
 
     #[test]
@@ -728,6 +745,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         assert!(!cli.stats);
     }
@@ -741,6 +759,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            generate_completions: None,
         };
         assert!(!cli.quiet);
     }
@@ -847,7 +866,200 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: true,
+            generate_completions: None,
         };
         assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_skips_checks_for_generate_completions() {
+        let cli = Cli {
+            query: "".to_string(),
+            path: PathBuf::from("/nonexistent/path/xyz"),
+            lang: "cobol".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: Some(Shell::Bash),
+        };
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_empty_query() {
+        let cli = Cli {
+            query: "   ".to_string(),
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "query must not be empty");
+    }
+
+    #[test]
+    fn test_validate_rejects_nonexistent_path_with_hint() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: PathBuf::from("/tmp/ast_search_nonexistent_xyz_99999"),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("does not exist"));
+        assert!(msg.contains("ast_search_nonexistent_xyz_99999"));
+        assert!(msg.contains("hint:"));
+    }
+
+    #[test]
+    fn test_validate_rejects_file_path_with_hint() {
+        use tempfile::NamedTempFile;
+        let f = NamedTempFile::new().unwrap();
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: f.path().to_path_buf(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("not a directory"));
+        assert!(msg.contains("hint:"));
+    }
+
+    #[test]
+    fn test_validate_rejects_unsupported_lang_with_hint() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "cobol".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("unsupported language"));
+        assert!(msg.contains("cobol"));
+        assert!(msg.contains("rust"));
+        assert!(msg.contains("python"));
+        assert!(msg.contains("example:"));
+    }
+
+    #[test]
+    fn test_validate_lang_is_case_sensitive() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "Rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        assert!(cli.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_accepts_all_supported_languages() {
+        for lang in &["rust", "python", "js", "ts", "go"] {
+            let cli = Cli {
+                query: "(fn)".to_string(),
+                path: std::env::temp_dir(),
+                lang: lang.to_string(),
+                no_color: false,
+                quiet: false,
+                stats: false,
+                generate_completions: None,
+            };
+            assert!(cli.validate().is_ok(), "validate() rejected valid lang: {}", lang);
+        }
+    }
+
+    #[test]
+    fn test_validate_checks_query_before_path() {
+        let cli = Cli {
+            query: "".to_string(),
+            path: PathBuf::from("/nonexistent/xyz"),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "query must not be empty");
+    }
+
+    #[test]
+    fn test_validate_checks_path_before_lang() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: PathBuf::from("/nonexistent/xyz_abc"),
+            lang: "cobol".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let result = cli.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_resolve_lang_all_variants() {
+        assert_eq!(resolve_lang("rust"), Language::Rust);
+        assert_eq!(resolve_lang("python"), Language::Python);
+        assert_eq!(resolve_lang("js"), Language::JavaScript);
+        assert_eq!(resolve_lang("ts"), Language::TypeScript);
+        assert_eq!(resolve_lang("go"), Language::Go);
+    }
+
+    #[test]
+    fn test_error_message_contains_newline_hint() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: PathBuf::from("/nonexistent/xyz_hint_test"),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let msg = cli.validate().unwrap_err();
+        assert!(msg.contains('\n'));
+        assert!(msg.contains("  hint:"));
+    }
+
+    #[test]
+    fn test_unsupported_lang_error_names_passed_value() {
+        let cli = Cli {
+            query: "(fn)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "fortran77".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            generate_completions: None,
+        };
+        let msg = cli.validate().unwrap_err();
+        assert!(msg.contains("fortran77"));
     }
 }

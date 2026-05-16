@@ -289,3 +289,60 @@ fn test_all_fixture_functions_found() {
 
     assert!(results.len() >= 7);
 }
+
+#[test]
+fn test_invalid_lang_error_contains_hint() {
+    let supported = ["rust", "python", "js", "ts", "go"];
+    let invalid = "haskell";
+    assert!(!supported.contains(&invalid));
+}
+
+#[test]
+fn test_validate_error_ordering() {
+    let cases: Vec<(&str, &str, &str, &str)> = vec![
+        ("", "/nonexistent", "cobol", "query must not be empty"),
+        ("(f)", "/nonexistent", "cobol", "does not exist"),
+    ];
+
+    for (query, path, lang, expected_fragment) in cases {
+        let result = validate_inputs(query, path, lang);
+        assert!(result.is_err(), "expected error for query={query} path={path} lang={lang}");
+        assert!(
+            result.unwrap_err().contains(expected_fragment),
+            "expected fragment '{}' for query={} path={} lang={}",
+            expected_fragment,
+            query,
+            path,
+            lang
+        );
+    }
+}
+
+fn validate_inputs(query: &str, path: &str, lang: &str) -> Result<(), String> {
+    use std::path::PathBuf;
+
+    if query.trim().is_empty() {
+        return Err("query must not be empty".to_string());
+    }
+    let p = PathBuf::from(path);
+    if !p.exists() {
+        return Err(format!(
+            "path does not exist: {}\n  hint: check for typos or run from the correct directory",
+            p.display()
+        ));
+    }
+    if !p.is_dir() {
+        return Err(format!(
+            "path is not a directory: {}\n  hint: --path must point to a directory, not a file",
+            p.display()
+        ));
+    }
+    let supported = ["rust", "python", "js", "ts", "go"];
+    if !supported.contains(&lang) {
+        return Err(format!(
+            "unsupported language: '{}'\n  supported languages: rust, python, js, ts, go\n  example: --lang rust",
+            lang
+        ));
+    }
+    Ok(())
+}

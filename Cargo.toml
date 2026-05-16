@@ -9,6 +9,7 @@ tree-sitter-rust = "0.21"
 rayon = "1.10"
 ignore = "0.4"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 thiserror = "1"
 
 [dev-dependencies]
