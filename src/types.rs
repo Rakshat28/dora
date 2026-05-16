@@ -95,10 +95,7 @@ mod tests {
             root_path: PathBuf::from("."),
             language: Language::Rust,
         };
-        let different_lang = SearchConfig {
-            language: Language::Python,
-            ..base.clone()
-        };
+        let different_lang = SearchConfig { language: Language::Python, ..base.clone() };
 
         assert_ne!(base, different_lang);
     }

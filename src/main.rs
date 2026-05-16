@@ -21,15 +21,12 @@ use walker::build_walker;
 #[derive(Parser, Debug)]
 #[command(name = "ast-search", about = "Structural AST-based code search")]
 struct Cli {
-    /// An S-expression query string.
     #[arg(short = 'q', long = "query")]
     query: String,
 
-    /// Root directory to search.
     #[arg(short = 'p', long = "path", default_value = ".")]
     path: PathBuf,
 
-    /// Language to parse.
     #[arg(short = 'l', long = "lang", default_value = "rust")]
     lang: String,
 }
@@ -62,7 +59,8 @@ fn main() {
                 match entry_result {
                     Ok(entry) => match parse_file(entry.path()) {
                         Ok((tree, source)) => {
-                            let matches = extract_matches(&tree, &source, query.as_ref(), entry.path());
+                            let matches =
+                                extract_matches(&tree, &source, query.as_ref(), entry.path());
                             acc.0.extend(matches);
                             acc.1 += 1;
                         }
