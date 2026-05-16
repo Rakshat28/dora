@@ -1,4 +1,5 @@
 use crate::types::MatchResult;
+use std::io::Write;
 use std::time::Duration;
 
 const RESET: &str = "\x1b[0m";
@@ -109,11 +110,16 @@ fn format_match(result: &MatchResult, color: &ColorMode) -> String {
     )
 }
 
-/// Print a single structural match result to stdout.
+/// Print a single structural match result to the provided writer.
 ///
-/// See [`format_match`] for the exact formatting rules.
-pub fn print_match(result: &MatchResult, color: &ColorMode) {
-    println!("{}", format_match(result, color));
+/// In production, pass a locked stdout handle. In tests, pass a `Vec<u8>`.
+///
+/// # Panics
+///
+/// Panics if writing to the provided writer fails.
+pub fn print_match<W: Write>(result: &MatchResult, color: &ColorMode, writer: &mut W) {
+    let line = format!("{}\n", format_match(result, color));
+    writer.write_all(line.as_bytes()).expect("failed to write match output");
 }
 
 /// Build the summary string (printed to stderr) without emitting it.
@@ -143,7 +149,7 @@ fn format_summary(matches: usize, files: usize, elapsed: Duration, _color: &Colo
     }
 }
 
-/// Print a search summary line to **stderr**.
+/// Print a search summary line to the provided writer.
 ///
 /// Always prints to stderr regardless of [`ColorMode`] — summary output
 /// is never colorized because it is diagnostic, not structured data.
@@ -165,19 +171,61 @@ fn format_summary(matches: usize, files: usize, elapsed: Duration, _color: &Colo
 /// * `files`   — number of files that were successfully parsed and searched
 /// * `elapsed` — wall-clock duration of the search (formatted as milliseconds)
 /// * `color`   — unused for summary output; accepted for API consistency
-pub fn print_summary(matches: usize, files: usize, elapsed: Duration, color: &ColorMode) {
-    eprintln!("{}", format_summary(matches, files, elapsed, color));
+///
+/// In production, pass a locked stderr handle. In tests, pass a `Vec<u8>`.
+///
+/// # Panics
+///
+/// Panics if writing to the provided writer fails.
+pub fn print_summary<W: Write>(
+    matches: usize,
+    files: usize,
+    elapsed: Duration,
+    color: &ColorMode,
+    writer: &mut W,
+) {
+    let line = format!("{}\n", format_summary(matches, files, elapsed, color));
+    writer.write_all(line.as_bytes()).expect("failed to write summary output");
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        colorize, format_match, format_summary, plural_file, plural_match, resolve_color_mode,
-        ColorMode, CYAN, GREEN, YELLOW,
+        colorize, format_match, format_summary, plural_file, plural_match, print_match,
+        print_summary, resolve_color_mode, ColorMode, CYAN, GREEN, YELLOW,
     };
     use crate::types::MatchResult;
+    use std::io::Write;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    fn buf_to_string(buf: Vec<u8>) -> String {
+        String::from_utf8(buf).expect("output contained non-UTF-8 bytes")
+    }
+
+    fn canonical_match_result() -> MatchResult {
+        MatchResult {
+            file_path: PathBuf::from("src/auth/handler.rs"),
+            capture_name: "fn_name".to_string(),
+            matched_text: "authenticate".to_string(),
+            start_line: 42,
+            start_col: 4,
+            end_line: 42,
+            end_col: 16,
+        }
+    }
+
+    struct FailWriter;
+
+    impl Write for FailWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "simulated pipe failure"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_colorize_off_returns_plain() {
@@ -334,5 +382,224 @@ mod tests {
         let a = format_summary(5, 10, Duration::from_millis(20), &ColorMode::On);
         let b = format_summary(5, 10, Duration::from_millis(20), &ColorMode::Off);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_print_match_writes_to_provided_writer() {
+        let result = canonical_match_result();
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+
+        let output = buf_to_string(buf);
+        assert!(!output.is_empty());
+        assert!(output.contains("src/auth/handler.rs"));
+        assert!(output.contains("fn_name"));
+        assert!(output.contains("authenticate"));
+    }
+
+    #[test]
+    fn test_print_match_output_equals_format_match_plus_newline() {
+        let result = canonical_match_result();
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+        let expected = format!("{}\n", format_match(&result, &ColorMode::Off));
+
+        assert_eq!(buf_to_string(buf), expected);
+    }
+
+    #[test]
+    fn test_print_match_color_off_no_ansi_in_writer() {
+        let result = canonical_match_result();
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(!output.contains("\x1b["));
+        assert!(output.contains("src/auth/handler.rs"));
+        assert!(output.contains("fn_name"));
+        assert!(output.contains("authenticate"));
+    }
+
+    #[test]
+    fn test_print_match_color_on_ansi_present_in_writer() {
+        let result = canonical_match_result();
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::On, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("\x1b[36m"));
+        assert!(output.contains("\x1b[33m"));
+        assert!(output.contains("\x1b[32m"));
+        assert!(output.contains("\x1b[0m"));
+        assert!(output.contains("src/auth/handler.rs"));
+        assert!(output.contains("authenticate"));
+        assert!(output.contains(":42:4"));
+        assert!(!output.contains(":42:4\x1b"));
+    }
+
+    #[test]
+    fn test_print_match_writes_exactly_one_newline() {
+        let result = canonical_match_result();
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.ends_with('\n'));
+        assert_eq!(output.chars().filter(|&c| c == '\n').count(), 1);
+    }
+
+    #[test]
+    fn test_print_match_multiple_results_accumulate_in_writer() {
+        let result1 = MatchResult {
+            file_path: PathBuf::from("src/a.rs"),
+            capture_name: "fn_name".to_string(),
+            matched_text: "alpha".to_string(),
+            start_line: 1,
+            start_col: 3,
+            end_line: 1,
+            end_col: 8,
+        };
+        let result2 = MatchResult {
+            file_path: PathBuf::from("src/b.rs"),
+            capture_name: "fn_name".to_string(),
+            matched_text: "beta".to_string(),
+            start_line: 5,
+            start_col: 3,
+            end_line: 5,
+            end_col: 7,
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result1, &ColorMode::Off, &mut buf);
+        print_match(&result2, &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("src/a.rs"));
+        assert!(output.contains("alpha"));
+        assert!(output.contains("src/b.rs"));
+        assert!(output.contains("beta"));
+        assert_eq!(output.lines().count(), 2);
+        assert!(output.lines().next().unwrap().contains("alpha"));
+        assert!(output.lines().nth(1).unwrap().contains("beta"));
+    }
+
+    #[test]
+    fn test_print_match_empty_matched_text() {
+        let result = MatchResult {
+            file_path: PathBuf::from("src/main.rs"),
+            capture_name: "optional_cap".to_string(),
+            matched_text: String::new(),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 0,
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("optional_cap"));
+        assert!(output.contains("\"\""));
+    }
+
+    #[test]
+    fn test_print_summary_writes_to_provided_writer() {
+        let mut buf: Vec<u8> = Vec::new();
+        print_summary(5, 20, Duration::from_millis(38), &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(!output.is_empty());
+        assert!(output.contains("5"));
+        assert!(output.contains("20"));
+        assert!(output.contains("38ms"));
+    }
+
+    #[test]
+    fn test_print_summary_output_equals_format_summary_plus_newline() {
+        let elapsed = Duration::from_millis(123);
+        let mut buf: Vec<u8> = Vec::new();
+        print_summary(10, 50, elapsed, &ColorMode::Off, &mut buf);
+        let expected = format!("{}\n", format_summary(10, 50, elapsed, &ColorMode::Off));
+
+        assert_eq!(buf_to_string(buf), expected);
+    }
+
+    #[test]
+    fn test_print_summary_zero_matches_in_writer() {
+        let mut buf: Vec<u8> = Vec::new();
+        print_summary(0, 8, Duration::from_millis(12), &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("No matches"));
+        assert!(!output.contains("Found 0"));
+        assert!(output.contains("8"));
+        assert!(output.contains("12ms"));
+    }
+
+    #[test]
+    fn test_print_summary_singular_forms_in_writer() {
+        let mut buf: Vec<u8> = Vec::new();
+        print_summary(1, 1, Duration::from_millis(3), &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("1 match"));
+        assert!(!output.contains("matches"));
+        assert!(output.contains("1 file"));
+        assert!(!output.contains("files"));
+        assert!(output.contains("3ms"));
+    }
+
+    #[test]
+    fn test_print_summary_writes_exactly_one_newline() {
+        let mut buf: Vec<u8> = Vec::new();
+        print_summary(3, 10, Duration::from_millis(5), &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.ends_with('\n'));
+        assert_eq!(output.chars().filter(|&c| c == '\n').count(), 1);
+    }
+
+    #[test]
+    fn test_print_match_and_summary_write_to_independent_writers() {
+        let result = canonical_match_result();
+        let mut match_buf: Vec<u8> = Vec::new();
+        let mut summary_buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut match_buf);
+        print_summary(1, 1, Duration::from_millis(5), &ColorMode::Off, &mut summary_buf);
+
+        assert!(!match_buf.is_empty());
+        assert!(!summary_buf.is_empty());
+        assert!(!buf_to_string(match_buf.clone()).contains("Found"));
+        assert!(!buf_to_string(match_buf.clone()).contains("No matches"));
+        assert!(!buf_to_string(summary_buf.clone()).contains("[@fn_name]"));
+        assert!(buf_to_string(match_buf).contains("authenticate"));
+        assert!(buf_to_string(summary_buf).contains("1 match"));
+    }
+
+    #[test]
+    #[should_panic(expected = "failed to write match output")]
+    fn test_print_match_writer_error_panics_with_message() {
+        let result = canonical_match_result();
+        let mut writer = FailWriter;
+        print_match(&result, &ColorMode::Off, &mut writer);
+    }
+
+    #[test]
+    fn test_print_match_multiline_matched_text() {
+        let result = MatchResult {
+            file_path: PathBuf::from("src/main.rs"),
+            capture_name: "block".to_string(),
+            matched_text: "fn foo() {\n    42\n}".to_string(),
+            start_line: 1,
+            start_col: 0,
+            end_line: 3,
+            end_col: 1,
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        print_match(&result, &ColorMode::Off, &mut buf);
+        let output = buf_to_string(buf);
+
+        assert!(output.contains("block"));
+        assert!(output.contains("fn foo()"));
+        assert!(output.lines().any(|line| line.contains("block")));
     }
 }

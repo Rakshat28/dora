@@ -93,9 +93,11 @@ fn main() {
 
     results.sort();
 
+    let mut stdout = std::io::stdout().lock();
     for result in &results {
-        print_match(result, &color);
+        print_match(result, &color, &mut stdout);
     }
 
-    print_summary(results.len(), processed_files, started_at.elapsed(), &color);
+    let mut stderr = std::io::stderr().lock();
+    print_summary(results.len(), processed_files, started_at.elapsed(), &color, &mut stderr);
 }
