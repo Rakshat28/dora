@@ -12,7 +12,7 @@ mod query;
 mod types;
 pub mod walker;
 
-use output::{print_match, print_summary};
+use output::{print_match, print_summary, resolve_color_mode};
 use parser::{get_language, parse_file};
 use query::{compile_query, extract_matches};
 use types::{Language, MatchResult};
@@ -29,10 +29,16 @@ struct Cli {
 
     #[arg(short = 'l', long = "lang", default_value = "rust")]
     lang: String,
+
+    /// Disable ANSI color output. Also honored via the `NO_COLOR` env var.
+    #[arg(long = "no-color", default_value_t = false)]
+    no_color: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    let color = resolve_color_mode(cli.no_color);
 
     let language = match get_language(&cli.lang) {
         Ok(language) => language,
@@ -88,8 +94,8 @@ fn main() {
     results.sort();
 
     for result in &results {
-        print_match(result);
+        print_match(result, &color);
     }
 
-    print_summary(results.len(), processed_files, started_at.elapsed().as_millis());
+    print_summary(results.len(), processed_files, started_at.elapsed(), &color);
 }

@@ -74,8 +74,8 @@ fn format_capture_name(base_name: &str, node: &Node<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use rayon::prelude::*;
+    use std::path::PathBuf;
 
     fn parse_inline(source: &str) -> (tree_sitter::Tree, String) {
         use crate::parser::parse_file;
@@ -97,7 +97,8 @@ mod tests {
 
         let source = "   fn target() {}";
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").expect("query compiles");
+        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
+            .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
         let results = extract_matches(&tree, &src, &query, &dummy_path());
@@ -109,11 +110,18 @@ mod tests {
         assert_eq!(results.len(), 1, "Expected exactly one match, got: {:?}", results);
 
         let r = &results[0];
-        assert_eq!(r.file_path, dummy_path(), "file_path must equal the path passed into extract_matches");
+        assert_eq!(
+            r.file_path,
+            dummy_path(),
+            "file_path must equal the path passed into extract_matches"
+        );
         assert_eq!(r.capture_name, "fn_name", "capture must be named 'fn_name'");
         assert_eq!(r.matched_text, "target", "matched_text must be the identifier text");
         assert_eq!(r.start_line, 1, "single-line source so start_line is 1 (1-indexed)");
-        assert_eq!(r.start_col, 6, "three leading spaces + 'fn ' (3 bytes) => identifier starts at column 6");
+        assert_eq!(
+            r.start_col, 6,
+            "three leading spaces + 'fn ' (3 bytes) => identifier starts at column 6"
+        );
         assert_eq!(r.end_line, 1, "end_line matches start_line for single-line source");
         assert_eq!(r.end_col, 12, "end_col == start_col + name.len() => 6 + 6 == 12");
     }
@@ -137,11 +145,19 @@ mod tests {
         drop(src);
 
         // #eq? predicate must eliminate the non-matching functions
-        assert_eq!(results.len(), 1, "Expected exactly 1 match for #eq? predicate, got: {:?}", results);
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected exactly 1 match for #eq? predicate, got: {:?}",
+            results
+        );
 
         let r = &results[0];
         assert_eq!(r.capture_name, "fn_name", "capture must be 'fn_name'");
-        assert_eq!(r.matched_text, "target_fn", "matched_text must be exactly the target function name");
+        assert_eq!(
+            r.matched_text, "target_fn",
+            "matched_text must be exactly the target function name"
+        );
         // The target function is on the second line of the source string
         assert_eq!(r.start_line, 2, "target function is on line 2 in the source string");
         // two leading spaces then 'fn ' so identifier starts at column 5
@@ -155,7 +171,11 @@ mod tests {
 
         let source = "fn other() {}\nfn handle_one() {}\nfn noop() {}\n    fn handle_two() {}";
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, r#"(function_item name: (identifier) @fn_name (#match? @fn_name "^handle_"))"#).expect("query compiles");
+        let query = compile_query(
+            &lang,
+            r#"(function_item name: (identifier) @fn_name (#match? @fn_name "^handle_"))"#,
+        )
+        .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
         let mut results = extract_matches(&tree, &src, &query, &dummy_path());
@@ -168,7 +188,12 @@ mod tests {
         // Sort by start_line because query match ordering is not guaranteed.
         results.sort_by_key(|r| r.start_line);
 
-        assert_eq!(results.len(), 2, "Expected exactly 2 matches for ^handle_ prefix, got: {:?}", results);
+        assert_eq!(
+            results.len(),
+            2,
+            "Expected exactly 2 matches for ^handle_ prefix, got: {:?}",
+            results
+        );
 
         // first handle_ is on line 2
         let a = &results[0];
@@ -200,7 +225,11 @@ mod tests {
         // extract_matches must be idempotent — calling it twice on the same tree produces identical results.
         // The query targets impl_item; source contains no impl blocks, so we expect an empty Vec<MatchResult>.
         assert_eq!(results1.len(), 0, "Expected zero matches for impl_item on this source");
-        assert_eq!(results1, Vec::new(), "Must return exactly an empty Vec<MatchResult>, not just any empty collection");
+        assert_eq!(
+            results1,
+            Vec::new(),
+            "Must return exactly an empty Vec<MatchResult>, not just any empty collection"
+        );
 
         // Call again on a freshly parsed tree to ensure no state is retained
         let (tree2, src2) = parse_inline(source);
@@ -223,7 +252,8 @@ mod tests {
         // 4. If Query were not Sync, the code would not compile.
 
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").expect("query compiles");
+        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
+            .expect("query compiles");
 
         let n = 8usize;
         let mut sources = Vec::new();
@@ -268,7 +298,11 @@ mod tests {
         let mut final_counts = counts.lock().expect("mutex lock").clone();
         final_counts.sort();
         assert_eq!(final_counts.len(), n, "All tasks must have reported their counts");
-        assert_eq!(final_counts, (1..=n).collect::<Vec<usize>>(), "Counts must be 1..=n after sorting");
+        assert_eq!(
+            final_counts,
+            (1..=n).collect::<Vec<usize>>(),
+            "Counts must be 1..=n after sorting"
+        );
 
         // After the scope closes and all cloned Arcs inside tasks are dropped, strong_count must be back to 1
         assert_eq!(Arc::strong_count(&query), 1, "Arc strong_count must be 1 after scope closes");
@@ -280,7 +314,8 @@ mod tests {
         use std::collections::HashSet;
 
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").expect("query compiles");
+        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
+            .expect("query compiles");
 
         let mut temp_files = Vec::new();
         let mut paths = Vec::new();
