@@ -2,10 +2,11 @@
 #![warn(clippy::pedantic)]
 
 use std::{
+    collections::HashSet,
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use clap::Parser;
@@ -48,30 +49,92 @@ fn format_file_error(error: &FileError) -> String {
     }
 }
 
-fn handle_file_error(error: &FileError, quiet: bool, skip_count: &Mutex<usize>) {
-    if !quiet {
-        eprintln!("{}", format_file_error(error));
-    }
+fn handle_file_error(error: &FileError, skip_count: &Mutex<usize>) {
+    eprintln!("{}", format_file_error(error));
     *skip_count.lock().expect("skip_count Mutex poisoned") += 1;
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "ast-search", about = "Structural AST-based code search")]
+#[command(
+    name = "ast-search",
+    version,
+    author,
+    about = "Structural AST-based code search — find code by shape, not by text.",
+    long_about = "ast-search parses source files into Abstract Syntax Trees and \
+                  executes structural pattern queries against them.\n\n\
+                  Unlike grep or ripgrep, ast-search understands code grammar. \
+                  It can find function definitions, not just strings that look \
+                  like them. It ignores matches inside comments, string literals, \
+                  and dead code.\n\n\
+                  Queries use Tree-sitter S-expression syntax:\n\
+                  \n  \
+                  ast-search -q '(function_item name: (identifier) @fn)' -p ./src\n\n\
+                  See https://github.com/your-org/ast-search for full documentation."
+)]
 struct Cli {
-    #[arg(short = 'q', long = "query")]
+    #[arg(
+        short = 'q',
+        long = "query",
+        value_name = "S-EXPR",
+        help = "Tree-sitter S-expression query pattern (required)",
+        long_help = "An S-expression structural query in Tree-sitter syntax.\n\n\
+                     Examples:\n\
+                     \n  Find all function definitions:\n  \
+                     (function_item name: (identifier) @fn_name)\
+                     \n\n  Find a specific function:\n  \
+                     (function_item name: (identifier) @fn (#eq? @fn \"connect\"))\
+                     \n\n  Find all struct definitions:\n  \
+                     (struct_item name: (type_identifier) @struct_name)"
+    )]
     query: String,
 
-    #[arg(short = 'p', long = "path", default_value = ".")]
+    #[arg(
+        short = 'p',
+        long = "path",
+        value_name = "DIR",
+        default_value = ".",
+        help = "Root directory to search (default: current directory)"
+    )]
     path: PathBuf,
 
-    #[arg(short = 'l', long = "lang", default_value = "rust")]
+    #[arg(
+        short = 'l',
+        long = "lang",
+        value_name = "LANG",
+        default_value = "rust",
+        help = "Language to parse: rust, python, js, ts, go (default: rust)"
+    )]
     lang: String,
 
-    #[arg(long = "no-color", default_value_t = false)]
+    #[arg(
+        long = "no-color",
+        default_value_t = false,
+        help = "Disable ANSI color output (also: set NO_COLOR env var)"
+    )]
     no_color: bool,
 
-    #[arg(long = "quiet", short = 'Q', default_value_t = false)]
+    #[arg(
+        long = "quiet",
+        short = 'Q',
+        default_value_t = false,
+        help = "Suppress per-match output lines — only print the summary"
+    )]
     quiet: bool,
+
+    #[arg(
+        long = "stats",
+        default_value_t = false,
+        help = "Print detailed performance statistics to stderr after the search"
+    )]
+    stats: bool,
+}
+
+struct SearchOutcome {
+    results: Vec<MatchResult>,
+    files_walked: usize,
+    files_parsed: usize,
+    files_skipped: usize,
+    files_with_matches: usize,
 }
 
 impl Cli {
@@ -102,66 +165,104 @@ fn resolve_lang(lang_str: &str) -> std::result::Result<Language, String> {
     }
 }
 
+fn usize_to_f64(value: usize) -> f64 {
+    f64::from(u32::try_from(value).unwrap_or(u32::MAX))
+}
+
+fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
+    let match_rate = if outcome.files_parsed == 0 {
+        0.0_f64
+    } else {
+        (usize_to_f64(outcome.files_with_matches) / usize_to_f64(outcome.files_parsed)) * 100.0
+    };
+
+    let elapsed_secs = elapsed.as_secs_f64();
+    let throughput = if elapsed_secs == 0.0 {
+        None
+    } else {
+        Some(usize_to_f64(outcome.files_parsed) / elapsed_secs)
+    };
+
+    eprintln!("--- search statistics ---");
+    eprintln!("{:<18}{}", "files walked:", outcome.files_walked);
+    eprintln!("{:<18}{}", "files parsed:", outcome.files_parsed);
+    eprintln!("{:<18}{}", "files skipped:", outcome.files_skipped);
+    eprintln!("{:<18}{}", "matches found:", outcome.results.len());
+    eprintln!("{:<18}{:.2}% (files with matches / files parsed)", "match rate:", match_rate);
+    eprintln!("{:<18}{}ms", "wall time:", elapsed.as_millis());
+    match throughput {
+        Some(t) => eprintln!("{:<18}{:.2} files/sec", "throughput:", t),
+        None => eprintln!("{:<18}N/A", "throughput:"),
+    }
+}
+
 #[must_use]
 #[allow(clippy::too_many_lines)]
 fn run_search(
     config: &SearchConfig,
     query: &Arc<tree_sitter::Query>,
     color: &ColorMode,
-    quiet: bool,
-) -> (Vec<MatchResult>, usize, usize) {
+) -> SearchOutcome {
     let _ = color;
 
     let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
-    let file_count = Arc::new(Mutex::new(0usize));
-    let skip_count = Arc::new(Mutex::new(0usize));
+    let files_walked_count = Arc::new(Mutex::new(0usize));
+    let files_parsed_count = Arc::new(Mutex::new(0usize));
+    let files_skipped_count = Arc::new(Mutex::new(0usize));
 
     let results_ref = Arc::clone(&results);
-    let file_count_ref = Arc::clone(&file_count);
-    let skip_count_ref = Arc::clone(&skip_count);
+    let files_walked_ref = Arc::clone(&files_walked_count);
+    let files_parsed_ref = Arc::clone(&files_parsed_count);
+    let files_skipped_ref = Arc::clone(&files_skipped_count);
     let query_ref = Arc::clone(query);
 
     build_walker(config.root_path.as_path(), &config.language).par_bridge().for_each(
         move |entry_result| match entry_result {
-            Ok(entry) => match parse_file(entry.path()) {
-                Ok((tree, source)) => {
-                    let matches = extract_matches(&tree, &source, query_ref.as_ref(), entry.path());
-                    drop(tree);
-                    drop(source);
+            Ok(entry) => {
+                *files_walked_ref
+                    .lock()
+                    .expect("files_walked Mutex was poisoned by a panicked thread") += 1;
 
-                    let mut results_guard = results_ref
-                        .lock()
-                        .expect("results Mutex was poisoned by a panicked thread");
-                    results_guard.extend(matches);
+                match parse_file(entry.path()) {
+                    Ok((tree, source)) => {
+                        let matches =
+                            extract_matches(&tree, &source, query_ref.as_ref(), entry.path());
+                        drop(tree);
+                        drop(source);
 
-                    let mut count_guard = file_count_ref
-                        .lock()
-                        .expect("file_count Mutex was poisoned by a panicked thread");
-                    *count_guard += 1;
+                        let mut results_guard = results_ref
+                            .lock()
+                            .expect("results Mutex was poisoned by a panicked thread");
+                        results_guard.extend(matches);
+
+                        let mut count_guard = files_parsed_ref
+                            .lock()
+                            .expect("files_parsed Mutex was poisoned by a panicked thread");
+                        *count_guard += 1;
+                    }
+                    Err(error) => {
+                        let file_error = match &error {
+                            AppError::IoError(_) => FileError::ReadFailure {
+                                path: entry.path().to_path_buf(),
+                                message: error.to_string(),
+                            },
+                            AppError::ParseError(_) => FileError::ParseFailure {
+                                path: entry.path().to_path_buf(),
+                                message: error.to_string(),
+                            },
+                            _ => FileError::ReadFailure {
+                                path: entry.path().to_path_buf(),
+                                message: format!("unexpected error: {error}"),
+                            },
+                        };
+                        handle_file_error(&file_error, &files_skipped_ref);
+                    }
                 }
-                Err(error) => {
-                    let file_error = match &error {
-                        AppError::IoError(_) => FileError::ReadFailure {
-                            path: entry.path().to_path_buf(),
-                            message: error.to_string(),
-                        },
-                        AppError::ParseError(_) => FileError::ParseFailure {
-                            path: entry.path().to_path_buf(),
-                            message: error.to_string(),
-                        },
-                        _ => FileError::ReadFailure {
-                            path: entry.path().to_path_buf(),
-                            message: format!("unexpected error: {error}"),
-                        },
-                    };
-                    handle_file_error(&file_error, quiet, &skip_count_ref);
-                }
-            },
+            }
             Err(error) => {
                 handle_file_error(
                     &FileError::WalkerAccess { path: None, message: error.to_string() },
-                    quiet,
-                    &skip_count_ref,
+                    &files_skipped_ref,
                 );
             }
         },
@@ -177,23 +278,33 @@ fn run_search(
             }
         }
     };
-    let processed_files = {
-        match Arc::try_unwrap(file_count) {
+    let files_walked = {
+        match Arc::try_unwrap(files_walked_count) {
             Ok(mutex) => {
-                mutex.into_inner().expect("file_count Mutex was poisoned by a panicked thread")
+                mutex.into_inner().expect("files_walked Mutex was poisoned by a panicked thread")
             }
             Err(shared) => {
-                *shared.lock().expect("file_count Mutex was poisoned by a panicked thread")
+                *shared.lock().expect("files_walked Mutex was poisoned by a panicked thread")
             }
         }
     };
-    let skipped_files = {
-        match Arc::try_unwrap(skip_count) {
+    let files_parsed = {
+        match Arc::try_unwrap(files_parsed_count) {
             Ok(mutex) => {
-                mutex.into_inner().expect("skip_count Mutex was poisoned by a panicked thread")
+                mutex.into_inner().expect("files_parsed Mutex was poisoned by a panicked thread")
             }
             Err(shared) => {
-                *shared.lock().expect("skip_count Mutex was poisoned by a panicked thread")
+                *shared.lock().expect("files_parsed Mutex was poisoned by a panicked thread")
+            }
+        }
+    };
+    let files_skipped = {
+        match Arc::try_unwrap(files_skipped_count) {
+            Ok(mutex) => {
+                mutex.into_inner().expect("files_skipped Mutex was poisoned by a panicked thread")
+            }
+            Err(shared) => {
+                *shared.lock().expect("files_skipped Mutex was poisoned by a panicked thread")
             }
         }
     };
@@ -201,7 +312,16 @@ fn run_search(
     final_results.sort();
     final_results.dedup();
 
-    (final_results, processed_files, skipped_files)
+    let files_with_matches =
+        final_results.iter().map(|r| &r.file_path).collect::<HashSet<_>>().len();
+
+    SearchOutcome {
+        results: final_results,
+        files_walked,
+        files_parsed,
+        files_skipped,
+        files_with_matches,
+    }
 }
 
 fn main() {
@@ -209,21 +329,21 @@ fn main() {
 
     let color = resolve_color_mode(cli.no_color);
 
-    if let Err(error) = cli.validate() {
-        eprintln!("error: {error}");
+    if let Err(message) = cli.validate() {
+        eprintln!("error: {message}");
         process::exit(1);
     }
 
-    let walker_language = match resolve_lang(&cli.lang) {
-        Ok(language) => language,
-        Err(error) => {
-            eprintln!("error: {error}");
+    let walker_lang = match resolve_lang(&cli.lang) {
+        Ok(lang) => lang,
+        Err(message) => {
+            eprintln!("error: {message}");
             process::exit(1);
         }
     };
 
-    let ts_language = match get_ts_language(&cli.lang) {
-        Ok(language) => language,
+    let ts_lang = match get_ts_language(&cli.lang) {
+        Ok(lang) => lang,
         Err(error) => {
             eprintln!("error: {error}");
             process::exit(1);
@@ -233,40 +353,53 @@ fn main() {
     let config = SearchConfig {
         query_str: cli.query.clone(),
         root_path: cli.path.clone(),
-        language: walker_language,
+        language: walker_lang,
     };
 
-    let query = match compile_query(&ts_language, &config.query_str) {
+    let query = match compile_query(&ts_lang, &config.query_str) {
         Ok(query) => query,
         Err(error) => {
-            eprintln!("error: failed to compile query: {error}");
+            eprintln!("error: {error}");
             process::exit(1);
         }
     };
 
     let started_at = Instant::now();
+    let outcome = run_search(&config, &query, &color);
 
-    let (results, file_count, skip_count) = run_search(&config, &query, &color, cli.quiet);
-
-    let mut stdout = std::io::stdout().lock();
-    for result in &results {
-        print_match(result, &color, &mut stdout);
+    let stdout = std::io::stdout();
+    if !cli.quiet {
+        for result in &outcome.results {
+            print_match(result, &color, &mut stdout.lock());
+        }
     }
 
-    let mut stderr = std::io::stderr().lock();
-    print_summary(results.len(), file_count, started_at.elapsed(), &color, &mut stderr);
+    print_summary(
+        outcome.results.len(),
+        outcome.files_parsed,
+        started_at.elapsed(),
+        &color,
+        &mut std::io::stderr().lock(),
+    );
 
-    if skip_count > 0 && !cli.quiet {
+    if outcome.files_skipped > 0 {
         eprintln!(
-            "warning: skipped {skip_count} {} due to errors (use --quiet to suppress)",
-            if skip_count == 1 { "file" } else { "files" }
+            "warning: skipped {} {} due to errors",
+            outcome.files_skipped,
+            if outcome.files_skipped == 1 { "file" } else { "files" }
         );
+    }
+
+    if cli.stats {
+        print_stats(&outcome, started_at.elapsed());
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{format_file_error, handle_file_error, resolve_lang, Cli, FileError};
+    use super::{
+        format_file_error, handle_file_error, resolve_lang, Cli, FileError, SearchOutcome,
+    };
     use crate::types::Language;
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -340,11 +473,11 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_file_error_quiet_increments_counter() {
+    fn test_handle_file_error_increments_counter() {
         let counter = Mutex::new(0usize);
         let error =
             FileError::ReadFailure { path: PathBuf::from("x.rs"), message: "test".to_string() };
-        handle_file_error(&error, true, &counter);
+        handle_file_error(&error, &counter);
         assert_eq!(*counter.lock().unwrap(), 1);
     }
 
@@ -353,9 +486,9 @@ mod tests {
         let counter = Mutex::new(0usize);
         let make_error =
             || FileError::ReadFailure { path: PathBuf::from("f.rs"), message: "e".to_string() };
-        handle_file_error(&make_error(), true, &counter);
-        handle_file_error(&make_error(), true, &counter);
-        handle_file_error(&make_error(), true, &counter);
+        handle_file_error(&make_error(), &counter);
+        handle_file_error(&make_error(), &counter);
+        handle_file_error(&make_error(), &counter);
         assert_eq!(*counter.lock().unwrap(), 3);
     }
 
@@ -367,6 +500,7 @@ mod tests {
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
+            stats: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -379,6 +513,7 @@ mod tests {
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
+            stats: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -398,6 +533,7 @@ mod tests {
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
+            stats: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -413,6 +549,7 @@ mod tests {
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
+            stats: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -580,5 +717,137 @@ mod tests {
         let after_second = results.clone();
 
         assert_eq!(after_first, after_second);
+    }
+
+    #[test]
+    fn test_stats_flag_defaults_false() {
+        let cli = Cli {
+            query: "(function_item)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+        };
+        assert!(!cli.stats);
+    }
+
+    #[test]
+    fn test_quiet_flag_defaults_false() {
+        let cli = Cli {
+            query: "(function_item)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+        };
+        assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn test_match_rate_zero_when_no_files_parsed() {
+        let rate = if 0 == 0 { 0.0_f64 } else { (0_f64 / 0_f64) * 100.0 };
+        assert_eq!(rate, 0.0);
+    }
+
+    #[test]
+    fn test_match_rate_full_when_all_files_match() {
+        let files_parsed = 10_usize;
+        let files_with_matches = 10_usize;
+        let rate = (files_with_matches as f64 / files_parsed as f64) * 100.0;
+        assert!((rate - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_match_rate_half() {
+        let files_parsed = 10_usize;
+        let files_with_matches = 5_usize;
+        let rate = (files_with_matches as f64 / files_parsed as f64) * 100.0;
+        assert!((rate - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_throughput_none_when_elapsed_zero() {
+        let elapsed_secs = 0.0_f64;
+        let throughput: Option<f64> =
+            if elapsed_secs == 0.0 { None } else { Some(100.0 / elapsed_secs) };
+        assert!(throughput.is_none());
+    }
+
+    #[test]
+    fn test_throughput_computation() {
+        let files_parsed = 100_usize;
+        let elapsed_secs = 0.5_f64;
+        let throughput = Some(files_parsed as f64 / elapsed_secs);
+        assert!((throughput.unwrap() - 200.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_search_outcome_fields() {
+        let outcome = SearchOutcome {
+            results: Vec::new(),
+            files_walked: 10,
+            files_parsed: 9,
+            files_skipped: 1,
+            files_with_matches: 3,
+        };
+        assert_eq!(outcome.files_walked, 10);
+        assert_eq!(outcome.files_parsed, 9);
+        assert_eq!(outcome.files_skipped, 1);
+        assert_eq!(outcome.files_with_matches, 3);
+        assert!(outcome.results.is_empty());
+    }
+
+    #[test]
+    fn test_files_with_matches_from_results() {
+        use std::collections::HashSet;
+
+        let results = vec![
+            crate::types::MatchResult {
+                file_path: PathBuf::from("src/a.rs"),
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 3,
+                capture_name: "fn".to_string(),
+                matched_text: "foo".to_string(),
+            },
+            crate::types::MatchResult {
+                file_path: PathBuf::from("src/a.rs"),
+                start_line: 5,
+                start_col: 0,
+                end_line: 5,
+                end_col: 3,
+                capture_name: "fn".to_string(),
+                matched_text: "bar".to_string(),
+            },
+            crate::types::MatchResult {
+                file_path: PathBuf::from("src/b.rs"),
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 3,
+                capture_name: "fn".to_string(),
+                matched_text: "baz".to_string(),
+            },
+        ];
+
+        let files_with_matches = results.iter().map(|r| &r.file_path).collect::<HashSet<_>>().len();
+
+        assert_eq!(files_with_matches, 2);
+    }
+
+    #[test]
+    fn test_cli_validate_with_stats_field() {
+        let cli = Cli {
+            query: "(function_item)".to_string(),
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: true,
+        };
+        assert!(cli.validate().is_ok());
     }
 }
