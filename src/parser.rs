@@ -21,8 +21,10 @@ pub fn get_language(lang: &str) -> Result<Language> {
         "js" => Ok(tree_sitter_javascript::language()),
         "ts" => Ok(tree_sitter_typescript::language_tsx()),
         "go" => Ok(tree_sitter_go::language()),
+        "c" => Ok(tree_sitter_c::language()),
+        "cpp" => Ok(tree_sitter_cpp::language()),
         other => Err(AppError::LanguageNotSupported(format!(
-            "Language '{other}' is not supported. Supported: rust, python, js, ts, go"
+            "Language '{other}' is not supported. Supported: rust, python, js, ts, go, c, cpp"
         ))),
     }
 }
@@ -239,6 +241,16 @@ mod tests {
     }
 
     #[test]
+    fn test_get_language_c() {
+        assert!(get_language("c").is_ok());
+    }
+
+    #[test]
+    fn test_get_language_cpp() {
+        assert!(get_language("cpp").is_ok());
+    }
+
+    #[test]
     fn test_get_language_ts() {
         assert!(get_language("ts").is_ok());
     }
@@ -365,7 +377,83 @@ mod tests {
         assert!(msg.contains("js"));
         assert!(msg.contains("ts"));
         assert!(msg.contains("go"));
+        assert!(msg.contains("c"));
+        assert!(msg.contains("cpp"));
         assert!(msg.contains("java"));
+    }
+
+    #[test]
+    fn test_parse_file_c_valid() {
+        let lang = get_language("c").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "int add(int a, int b) {{").unwrap();
+        writeln!(file, "    return a + b;").unwrap();
+        writeln!(file, "}}").unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok());
+        let (tree, source) = result.unwrap();
+        assert_eq!(tree.root_node().kind(), "translation_unit");
+        assert!(!tree.root_node().has_error());
+        assert!(source.contains("int add"));
+        drop(tree);
+        drop(source);
+    }
+
+    #[test]
+    fn test_parse_file_cpp_valid() {
+        let lang = get_language("cpp").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "class Calculator {{").unwrap();
+        writeln!(file, "public:").unwrap();
+        writeln!(file, "    int add(int a, int b) {{ return a + b; }}").unwrap();
+        writeln!(file, "}};").unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok());
+        let (tree, source) = result.unwrap();
+        assert_eq!(tree.root_node().kind(), "translation_unit");
+        assert!(!tree.root_node().has_error());
+        assert!(source.contains("class Calculator"));
+        drop(tree);
+        drop(source);
+    }
+
+    #[test]
+    fn test_c_grammar_on_cpp_class_has_errors() {
+        let c_lang = get_language("c").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "class Calculator {{").unwrap();
+        writeln!(file, "public:").unwrap();
+        writeln!(file, "    int add(int a, int b) {{ return a + b; }}").unwrap();
+        writeln!(file, "}};").unwrap();
+        let result = parse_file(file.path(), &c_lang);
+        assert!(result.is_ok());
+        let (tree, _source) = result.unwrap();
+        assert!(tree.root_node().has_error());
+        drop(tree);
+    }
+
+    #[test]
+    fn test_sequential_parse_c_then_cpp_same_thread() {
+        let c_lang = get_language("c").unwrap();
+        let cpp_lang = get_language("cpp").unwrap();
+
+        let mut c_file = NamedTempFile::new().unwrap();
+        writeln!(c_file, "int foo(void) {{ return 0; }}").unwrap();
+
+        let mut cpp_file = NamedTempFile::new().unwrap();
+        writeln!(cpp_file, "class Foo {{ public: int bar() {{ return 0; }} }};").unwrap();
+
+        let (c_tree, c_src) = parse_file(c_file.path(), &c_lang).unwrap();
+        assert_eq!(c_tree.root_node().kind(), "translation_unit");
+        assert!(!c_tree.root_node().has_error());
+        drop(c_tree);
+        drop(c_src);
+
+        let (cpp_tree, cpp_src) = parse_file(cpp_file.path(), &cpp_lang).unwrap();
+        assert_eq!(cpp_tree.root_node().kind(), "translation_unit");
+        assert!(!cpp_tree.root_node().has_error());
+        drop(cpp_tree);
+        drop(cpp_src);
     }
 
     #[test]

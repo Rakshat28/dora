@@ -56,6 +56,8 @@ pub fn extensions_for_language(lang: &Language) -> &'static [&'static str] {
         Language::JavaScript => &["js", "mjs", "cjs"],
         Language::TypeScript => &["ts", "mts", "cts", "tsx"],
         Language::Go => &["go"],
+        Language::C => &["c", "h"],
+        Language::Cpp => &["cpp", "cc", "hpp", "hxx", "cxx", "h"],
     }
 }
 
@@ -163,6 +165,24 @@ mod tests {
         }
 
         #[test]
+        fn c_extension_set() {
+            let exts = extensions_for_language(&Language::C);
+            assert!(exts.contains(&"c"));
+            assert!(exts.contains(&"h"));
+        }
+
+        #[test]
+        fn cpp_extension_set() {
+            let exts = extensions_for_language(&Language::Cpp);
+            assert!(exts.contains(&"cpp"));
+            assert!(exts.contains(&"cc"));
+            assert!(exts.contains(&"hpp"));
+            assert!(exts.contains(&"hxx"));
+            assert!(exts.contains(&"cxx"));
+            assert!(exts.contains(&"h"));
+        }
+
+        #[test]
         fn no_extension_set_is_empty() {
             for lang in &[
                 Language::Rust,
@@ -170,6 +190,8 @@ mod tests {
                 Language::JavaScript,
                 Language::TypeScript,
                 Language::Go,
+                Language::C,
+                Language::Cpp,
             ] {
                 assert!(
                     !extensions_for_language(lang).is_empty(),

@@ -292,7 +292,7 @@ fn test_all_fixture_functions_found() {
 
 #[test]
 fn test_invalid_lang_error_contains_hint() {
-    let supported = ["rust", "python", "js", "ts", "go"];
+    let supported = ["rust", "python", "js", "ts", "go", "c", "cpp"];
     let invalid = "haskell";
     assert!(!supported.contains(&invalid));
 }
@@ -337,10 +337,10 @@ fn validate_inputs(query: &str, path: &str, lang: &str) -> Result<(), String> {
             p.display()
         ));
     }
-    let supported = ["rust", "python", "js", "ts", "go"];
+    let supported = ["rust", "python", "js", "ts", "go", "c", "cpp"];
     if !supported.contains(&lang) {
         return Err(format!(
-            "unsupported language: '{}'\n  supported languages: rust, python, js, ts, go\n  example: --lang rust",
+            "unsupported language: '{}'\n  supported languages: rust, python, js, ts, go, c, cpp\n  example: --lang rust",
             lang
         ));
     }
@@ -1069,4 +1069,391 @@ fn test_all_five_languages_parse_minimal_source() {
         drop(tree);
         drop(src);
     }
+}
+
+#[test]
+fn test_c_function_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.c");
+    let lang = get_language("c").unwrap();
+    let query = compile_query(
+        &lang,
+        "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> = results
+        .iter()
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    assert!(names.contains("add"),      "must find 'add'");
+    assert!(names.contains("multiply"), "must find 'multiply'");
+    assert!(names.contains("greet"),    "must find 'greet'");
+}
+
+#[test]
+fn test_c_function_exact_positions() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.c");
+    let lang = get_language("c").unwrap();
+    let query = compile_query(
+        &lang,
+        "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    let add = results.iter().find(|r| r.matched_text == "add").unwrap();
+    assert_eq!(add.start_line, 3);
+    assert_eq!(add.start_col, 4);
+    assert_eq!(add.end_col, 7);
+
+    let multiply = results.iter().find(|r| r.matched_text == "multiply").unwrap();
+    assert_eq!(multiply.start_line, 7);
+    assert_eq!(multiply.start_col, 4);
+    assert_eq!(multiply.end_col, 12);
+
+    let greet = results.iter().find(|r| r.matched_text == "greet").unwrap();
+    assert_eq!(greet.start_line, 16);
+    assert_eq!(greet.start_col, 5);
+    assert_eq!(greet.end_col, 10);
+}
+
+#[test]
+fn test_c_typedef_name_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.c");
+    let lang = get_language("c").unwrap();
+    let query = compile_query(
+        &lang,
+        "(type_definition declarator: (type_identifier) @type_name)",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Point");
+    assert_eq!(results[0].start_line, 14);
+    assert_eq!(results[0].start_col, 2);
+    assert_eq!(results[0].end_col, 7);
+}
+
+#[test]
+fn test_cpp_class_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = compile_query(
+        &lang,
+        "(class_specifier name: (type_identifier) @class_name)",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    let names: std::collections::HashSet<&str> = results
+        .iter()
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    assert!(names.contains("Animal"));
+    assert!(names.contains("Dog"));
+    assert_eq!(results.len(), 2);
+
+    let animal = results.iter().find(|r| r.matched_text == "Animal").unwrap();
+    assert_eq!(animal.start_line, 3);
+    assert_eq!(animal.start_col, 6);
+    assert_eq!(animal.end_col, 12);
+
+    let dog = results.iter().find(|r| r.matched_text == "Dog").unwrap();
+    assert_eq!(dog.start_line, 9);
+    assert_eq!(dog.start_col, 6);
+    assert_eq!(dog.end_col, 9);
+}
+
+#[test]
+fn test_cpp_struct_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = compile_query(
+        &lang,
+        "(struct_specifier name: (type_identifier) @struct_name)",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Point");
+    assert_eq!(results[0].start_line, 25);
+    assert_eq!(results[0].start_col, 7);
+    assert_eq!(results[0].end_col, 12);
+}
+
+#[test]
+fn test_cpp_free_function_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = compile_query(
+        &lang,
+        "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> = results
+        .iter()
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    assert!(names.contains("add"));
+    assert!(names.contains("multiply"));
+}
+
+#[test]
+fn test_c_walker_extensions() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use tempfile::TempDir;
+    use std::fs;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("main.c"),   b"int main() { return 0; }").unwrap();
+    fs::write(dir.path().join("util.h"),   b"void util();").unwrap();
+    fs::write(dir.path().join("app.cpp"),  b"int main() { return 0; }").unwrap();
+    fs::write(dir.path().join("lib.hpp"),  b"class Lib {};" ).unwrap();
+    fs::write(dir.path().join("main.rs"),  b"fn main() {}" ).unwrap();
+
+    let entries: Vec<_> = build_walker(dir.path(), &Language::C)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| {
+            e.path()
+             .file_name()
+             .map(|n| n.to_string_lossy().into_owned())
+        })
+        .collect();
+
+    assert!(names.contains("main.c"));
+    assert!(names.contains("util.h"));
+    assert!(!names.contains("app.cpp"));
+    assert!(!names.contains("lib.hpp"));
+    assert!(!names.contains("main.rs"));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn test_cpp_walker_extensions() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use tempfile::TempDir;
+    use std::fs;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("app.cpp"),    b"int main() {}").unwrap();
+    fs::write(dir.path().join("lib.cc"),     b"void lib() {}").unwrap();
+    fs::write(dir.path().join("types.hpp"),  b"struct Point {};" ).unwrap();
+    fs::write(dir.path().join("util.hxx"),   b"void util();").unwrap();
+    fs::write(dir.path().join("mod.cxx"),    b"void mod() {}").unwrap();
+    fs::write(dir.path().join("shared.h"),   b"void shared();").unwrap();
+    fs::write(dir.path().join("main.c"),     b"int main() { return 0; }").unwrap();
+    fs::write(dir.path().join("main.rs"),    b"fn main() {}").unwrap();
+
+    let entries: Vec<_> = build_walker(dir.path(), &Language::Cpp)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| {
+            e.path()
+             .file_name()
+             .map(|n| n.to_string_lossy().into_owned())
+        })
+        .collect();
+
+    assert!(names.contains("app.cpp"));
+    assert!(names.contains("lib.cc"));
+    assert!(names.contains("types.hpp"));
+    assert!(names.contains("util.hxx"));
+    assert!(names.contains("mod.cxx"));
+    assert!(names.contains("shared.h"));
+    assert!(!names.contains("main.c"));
+    assert!(!names.contains("main.rs"));
+    assert_eq!(entries.len(), 6);
+}
+
+#[test]
+fn test_c_eq_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.c");
+    let lang = get_language("c").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_definition
+             declarator: (function_declarator
+               declarator: (identifier) @fn_name
+               (#eq? @fn_name "add")))"#,
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "add");
+    assert_eq!(results[0].start_line, 3);
+}
+
+#[test]
+fn test_cpp_eq_predicate_class() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(class_specifier name: (type_identifier) @class_name (#eq? @class_name \"Dog\"))"#,
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Dog");
+    assert_eq!(results[0].start_line, 9);
+}
+
+#[test]
+fn test_all_seven_languages_compile_queries() {
+    use ast_search::parser::get_language;
+    use ast_search::query::compile_query;
+
+    let cases = vec![
+        ("rust",   "(function_item name: (identifier) @fn_name)"),
+        ("python", "(function_definition name: (identifier) @fn_name)"),
+        ("js",     "(function_declaration name: (identifier) @fn_name)"),
+        ("ts",     "(function_declaration name: (identifier) @fn_name)"),
+        ("go",     "(function_declaration name: (identifier) @fn_name)"),
+        ("c",      "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))"),
+        ("cpp",    "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))"),
+    ];
+
+    for (lang_str, query_str) in cases {
+        let lang = get_language(lang_str).unwrap();
+        let result = compile_query(&lang, query_str);
+        assert!(result.is_ok(), "query compile failed for lang={}: {:?}", lang_str, result.err());
+    }
+}
+
+#[test]
+fn test_all_seven_languages_parse_minimal_source() {
+    use ast_search::parser::{get_language, parse_file};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("rust", "fn main() {}", "source_file"),
+        ("python", "def main(): pass", "module"),
+        ("js", "function main() {}", "program"),
+        ("ts", "function main(): void {}", "program"),
+        ("go", "package main\nfunc main() {}", "source_file"),
+        ("c", "int main(void) { return 0; }", "translation_unit"),
+        ("cpp", "int main() { return 0; }", "translation_unit"),
+    ];
+
+    for (lang_str, source, expected_root_kind) in cases {
+        let lang = get_language(lang_str).unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok(), "parse failed for lang={}: {:?}", lang_str, result.err());
+        let (tree, src) = result.unwrap();
+        assert_eq!(tree.root_node().kind(), expected_root_kind, "wrong root node kind for lang={}", lang_str);
+        assert!(!tree.root_node().has_error(), "unexpected parse errors for lang={}", lang_str);
+        drop(tree);
+        drop(src);
+    }
+}
+
+#[test]
+fn test_c_and_cpp_results_do_not_mix() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let c_fixture = fixtures_dir().join("simple.c");
+    let cpp_fixture = fixtures_dir().join("simple.cpp");
+
+    let c_lang = get_language("c").unwrap();
+    let cpp_lang = get_language("cpp").unwrap();
+
+    let query_str = "(function_definition declarator: (function_declarator declarator: (identifier) @fn_name))";
+
+    let c_query = compile_query(&c_lang, query_str).unwrap();
+    let cpp_query = compile_query(&cpp_lang, query_str).unwrap();
+
+    let (c_tree, c_src) = parse_file(&c_fixture, &c_lang).unwrap();
+    let c_results = extract_matches(&c_tree, &c_src, &c_query, &c_fixture);
+    drop(c_tree);
+    drop(c_src);
+
+    let (cpp_tree, cpp_src) = parse_file(&cpp_fixture, &cpp_lang).unwrap();
+    let cpp_results = extract_matches(&cpp_tree, &cpp_src, &cpp_query, &cpp_fixture);
+    drop(cpp_tree);
+    drop(cpp_src);
+
+    for r in &c_results {
+        assert_eq!(r.file_path, c_fixture);
+    }
+    for r in &cpp_results {
+        assert_eq!(r.file_path, cpp_fixture);
+    }
+
+    assert!(!c_results.is_empty());
+    assert!(!cpp_results.is_empty());
 }

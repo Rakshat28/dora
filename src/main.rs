@@ -171,10 +171,10 @@ impl Cli {
             ));
         }
 
-        let supported = ["rust", "python", "js", "ts", "go"];
+        let supported = ["rust", "python", "js", "ts", "go", "c", "cpp"];
         if !supported.contains(&self.lang.as_str()) {
             return Err(format!(
-                "unsupported language: '{}'\n  supported languages: rust, python, js, ts, go\n  example: --lang rust",
+                "unsupported language: '{}\n  supported languages: rust, python, js, ts, go, c, cpp\n  example: --lang rust",
                 self.lang
             ));
         }
@@ -601,6 +601,8 @@ mod tests {
         assert_eq!(resolve_lang("js"), Language::JavaScript);
         assert_eq!(resolve_lang("ts"), Language::TypeScript);
         assert_eq!(resolve_lang("go"), Language::Go);
+        assert_eq!(resolve_lang("c"), Language::C);
+        assert_eq!(resolve_lang("cpp"), Language::Cpp);
     }
 
     #[test]
@@ -980,7 +982,7 @@ mod tests {
 
     #[test]
     fn test_validate_accepts_all_supported_languages() {
-        for lang in &["rust", "python", "js", "ts", "go"] {
+        for lang in &["rust", "python", "js", "ts", "go", "c", "cpp"] {
             let cli = Cli {
                 query: "(fn)".to_string(),
                 path: std::env::temp_dir(),
@@ -1033,6 +1035,8 @@ mod tests {
         assert_eq!(resolve_lang("js"), Language::JavaScript);
         assert_eq!(resolve_lang("ts"), Language::TypeScript);
         assert_eq!(resolve_lang("go"), Language::Go);
+        assert_eq!(resolve_lang("c"), Language::C);
+        assert_eq!(resolve_lang("cpp"), Language::Cpp);
     }
 
     #[test]

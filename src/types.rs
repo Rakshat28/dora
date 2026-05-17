@@ -10,6 +10,8 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Go,
+    C,
+    Cpp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
