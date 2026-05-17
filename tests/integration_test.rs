@@ -20,7 +20,7 @@ fn run_pipeline(fixture_dir: &Path, query_str: &str) -> Vec<MatchResult> {
             Ok(e) => e,
             Err(_) => return,
         };
-        let (tree, source) = match parse_file(entry.path()) {
+        let (tree, source) = match parse_file(entry.path(), &ts_lang) {
             Ok(pair) => pair,
             Err(_) => return,
         };
@@ -345,4 +345,207 @@ fn validate_inputs(query: &str, path: &str, lang: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[test]
+fn test_python_function_name_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.py");
+    let lang = get_language("python").unwrap();
+    let query = compile_query(
+        &lang,
+        "(function_definition name: (identifier) @fn_name)",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> = results
+        .iter()
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    assert_eq!(names.len(), 3);
+    assert!(names.contains("greet"));
+    assert!(names.contains("add"));
+    assert!(names.contains("multiply"));
+}
+
+#[test]
+fn test_python_function_line_numbers() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.py");
+    let lang = get_language("python").unwrap();
+    let query = compile_query(
+        &lang,
+        "(function_definition name: (identifier) @fn_name)",
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    assert_eq!(results.len(), 3);
+
+    assert_eq!(results[0].matched_text, "greet");
+    assert_eq!(results[0].start_line, 1);
+    assert_eq!(results[0].start_col, 4);
+    assert_eq!(results[0].end_col, 9);
+
+    assert_eq!(results[1].matched_text, "add");
+    assert_eq!(results[1].start_line, 5);
+    assert_eq!(results[1].start_col, 4);
+    assert_eq!(results[1].end_col, 7);
+
+    assert_eq!(results[2].matched_text, "multiply");
+    assert_eq!(results[2].start_line, 9);
+    assert_eq!(results[2].start_col, 4);
+    assert_eq!(results[2].end_col, 12);
+}
+
+#[test]
+fn test_python_walker_finds_py_files() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use tempfile::TempDir;
+    use std::fs;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("script.py"), b"def foo(): pass").unwrap();
+    fs::write(dir.path().join("lib.py"),    b"def bar(): pass").unwrap();
+    fs::write(dir.path().join("main.rs"),   b"fn main() {}").unwrap();
+
+    let entries: Vec<_> = build_walker(dir.path(), &Language::Python)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let names: Vec<String> = entries
+        .iter()
+        .filter_map(|e| {
+            e.path()
+             .file_name()
+             .map(|n| n.to_string_lossy().into_owned())
+        })
+        .collect();
+
+    assert!(names.contains(&"script.py".to_string()));
+    assert!(names.contains(&"lib.py".to_string()));
+    assert!(!names.contains(&"main.rs".to_string()));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn test_python_walker_includes_pyi_stubs() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use tempfile::TempDir;
+    use std::fs;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("module.pyi"), b"def foo(x: int) -> str: ...").unwrap();
+    fs::write(dir.path().join("lib.py"),     b"def bar(): pass").unwrap();
+
+    let entries: Vec<_> = build_walker(dir.path(), &Language::Python)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let names: Vec<String> = entries
+        .iter()
+        .filter_map(|e| {
+            e.path()
+             .file_name()
+             .map(|n| n.to_string_lossy().into_owned())
+        })
+        .collect();
+
+    assert!(names.contains(&"module.pyi".to_string()));
+    assert!(names.contains(&"lib.py".to_string()));
+}
+
+#[test]
+fn test_python_eq_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.py");
+    let lang = get_language("python").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_definition name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "add");
+    assert_eq!(results[0].start_line, 5);
+}
+
+#[test]
+fn test_rust_and_python_results_do_not_mix() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let rust_fixture   = fixtures_dir().join("simple.rs");
+    let python_fixture = fixtures_dir().join("simple.py");
+
+    let rust_lang   = get_language("rust").unwrap();
+    let python_lang = get_language("python").unwrap();
+
+    let rust_query = compile_query(
+        &rust_lang,
+        "(function_item name: (identifier) @fn_name)",
+    ).unwrap();
+
+    let python_query = compile_query(
+        &python_lang,
+        "(function_definition name: (identifier) @fn_name)",
+    ).unwrap();
+
+    let (rust_tree, rust_src) = parse_file(&rust_fixture, &rust_lang).unwrap();
+    let rust_results = extract_matches(
+        &rust_tree, &rust_src, &rust_query, &rust_fixture,
+    );
+    drop(rust_tree);
+    drop(rust_src);
+
+    let (py_tree, py_src) = parse_file(&python_fixture, &python_lang).unwrap();
+    let py_results = extract_matches(
+        &py_tree, &py_src, &python_query, &python_fixture,
+    );
+    drop(py_tree);
+    drop(py_src);
+
+    assert_eq!(rust_results.len(), 1);
+    assert_eq!(rust_results[0].matched_text, "add");
+
+    assert_eq!(py_results.len(), 3);
+
+    let py_names: std::collections::HashSet<&str> = py_results
+        .iter()
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    assert!(py_names.contains("greet"));
+    assert!(py_names.contains("add"));
+    assert!(py_names.contains("multiply"));
+
+    for pr in &py_results {
+        assert_ne!(pr.file_path, rust_fixture);
+    }
+    for rr in &rust_results {
+        assert_ne!(rr.file_path, python_fixture);
+    }
 }

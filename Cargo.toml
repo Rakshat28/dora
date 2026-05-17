@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 tree-sitter = "0.22"
 tree-sitter-rust = "0.21"
+tree-sitter-python = "0.21"
 rayon = "1.10"
 ignore = "0.4"
 clap = { version = "4", features = ["derive"] }

@@ -230,9 +230,12 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
 fn run_search(
     config: &SearchConfig,
     query: &Arc<tree_sitter::Query>,
+    ts_lang: &tree_sitter::Language,
     color: &ColorMode,
+    quiet: bool,
 ) -> SearchOutcome {
     let _ = color;
+    let _ = quiet;
 
     let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
     let files_walked_count = Arc::new(Mutex::new(0usize));
@@ -252,7 +255,7 @@ fn run_search(
                     .lock()
                     .expect("files_walked Mutex was poisoned by a panicked thread") += 1;
 
-                match parse_file(entry.path()) {
+                match parse_file(entry.path(), ts_lang) {
                     Ok((tree, source)) => {
                         let matches =
                             extract_matches(&tree, &source, query_ref.as_ref(), entry.path());
@@ -394,7 +397,7 @@ fn main() {
     };
 
     let started_at = Instant::now();
-    let outcome = run_search(&config, &query, &color);
+    let outcome = run_search(&config, &query, &ts_lang, &color, cli.quiet);
 
     let stdout = std::io::stdout();
     if !cli.quiet {

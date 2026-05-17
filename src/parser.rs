@@ -6,11 +6,7 @@ use std::path::Path;
 use tree_sitter::{Language, Parser, Tree};
 
 fn create_parser() -> Parser {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::language())
-        .expect("failed to initialize Rust parser: tree-sitter language registration failed");
-    parser
+    Parser::new()
 }
 
 thread_local! {
@@ -21,15 +17,16 @@ thread_local! {
 pub fn get_language(lang: &str) -> Result<Language> {
     match lang {
         "rust" => Ok(tree_sitter_rust::language()),
+        "python" => Ok(tree_sitter_python::language()),
         other => Err(AppError::LanguageNotSupported(format!(
-            "Language '{other}' is not supported. Supported: rust"
+            "Language '{other}' is not supported. Supported: rust, python"
         ))),
     }
 }
 
 #[must_use = "The returned Tree and String must be dropped immediately after query execution. Holding them accumulates unbounded RAM."]
 #[allow(clippy::missing_errors_doc)]
-pub fn parse_file(path: &Path) -> Result<(Tree, String)> {
+pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree, String)> {
     let source = std::fs::read_to_string(path).map_err(AppError::IoError)?;
 
     if source.is_empty() {
@@ -41,14 +38,15 @@ pub fn parse_file(path: &Path) -> Result<(Tree, String)> {
 
     let tree = PARSER.with(|cell| {
         let mut parser = cell.borrow_mut();
-
+        parser
+            .set_language(language)
+            .expect("failed to set language on parser: grammar/library version mismatch");
         parser.parse(source.as_bytes(), None)
     });
 
     let tree = tree.ok_or_else(|| {
         AppError::ParseError(format!(
-            "Tree-sitter returned no parse tree for: {}. \
-     This may indicate a grammar/library version mismatch.",
+            "Tree-sitter returned no parse tree for: {}. This may indicate a grammar/library version mismatch.",
             path.display()
         ))
     })?;
@@ -108,7 +106,7 @@ mod tests {
     fn test_parse_file_empty_returns_error() {
         let file = NamedTempFile::new().unwrap();
 
-        let result = parse_file(file.path());
+        let result = parse_file(file.path(), &get_language("rust").unwrap());
 
         assert!(
             matches!(result, Err(AppError::ParseError(_))),
@@ -128,7 +126,7 @@ mod tests {
         writeln!(file, "    format!(\"Hello, {{}}!\", name)").unwrap();
         writeln!(file, "}}").unwrap();
 
-        let result = parse_file(file.path());
+        let result = parse_file(file.path(), &get_language("rust").unwrap());
 
         assert!(
             result.is_ok(),
@@ -156,7 +154,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&[0xFF, 0xFE, 0x00, 0x80, 0xBF]).unwrap();
 
-        let result = parse_file(file.path());
+        let result = parse_file(file.path(), &get_language("rust").unwrap());
 
         assert!(
             matches!(result, Err(AppError::IoError(_))),
@@ -172,7 +170,7 @@ mod tests {
         writeln!(file, "    let x = ;;; ???").unwrap();
         writeln!(file, "}}}}}}}}").unwrap();
 
-        let result = parse_file(file.path());
+        let result = parse_file(file.path(), &get_language("rust").unwrap());
 
         assert!(
             result.is_ok(),
@@ -201,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_parse_file_nonexistent_path_returns_io_error() {
-        let result = parse_file(Path::new("/tmp/ast_search_this_file_does_not_exist_xyz.rs"));
+        let result = parse_file(Path::new("/tmp/ast_search_this_file_does_not_exist_xyz.rs"), &get_language("rust").unwrap());
 
         assert!(
             matches!(result, Err(AppError::IoError(_))),
@@ -215,7 +213,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "struct Config {{ timeout: u64 }}").unwrap();
 
-        let (tree, source) = parse_file(file.path()).unwrap();
+        let (tree, source) = parse_file(file.path(), &get_language("rust").unwrap()).unwrap();
 
         let owned: (Tree, String) = (tree, source);
 
