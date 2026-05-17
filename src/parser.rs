@@ -20,8 +20,9 @@ pub fn get_language(lang: &str) -> Result<Language> {
         "python" => Ok(tree_sitter_python::language()),
         "js" => Ok(tree_sitter_javascript::language()),
         "ts" => Ok(tree_sitter_typescript::language_tsx()),
+        "go" => Ok(tree_sitter_go::language()),
         other => Err(AppError::LanguageNotSupported(format!(
-            "Language '{other}' is not supported. Supported: rust, python, js, ts"
+            "Language '{other}' is not supported. Supported: rust, python, js, ts, go"
         ))),
     }
 }
@@ -348,5 +349,55 @@ mod tests {
         assert!(!rs_tree.root_node().has_error());
         drop(rs_tree);
         drop(rs_src);
+    }
+
+    #[test]
+    fn test_get_language_go() {
+        assert!(get_language("go").is_ok());
+    }
+
+    #[test]
+    fn test_get_language_error_lists_all_supported() {
+        let err = get_language("java").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("rust"));
+        assert!(msg.contains("python"));
+        assert!(msg.contains("js"));
+        assert!(msg.contains("ts"));
+        assert!(msg.contains("go"));
+        assert!(msg.contains("java"));
+    }
+
+    #[test]
+    fn test_parse_file_go_valid() {
+        let lang = get_language("go").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "package main").unwrap();
+        writeln!(file, "").unwrap();
+        writeln!(file, "func greet(name string) string {{").unwrap();
+        writeln!(file, "    return \"Hello, \" + name").unwrap();
+        writeln!(file, "}}").unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok());
+        let (tree, source) = result.unwrap();
+        assert_eq!(tree.root_node().kind(), "source_file");
+        assert!(!tree.root_node().has_error());
+        assert!(source.contains("func greet"));
+        drop(tree);
+        drop(source);
+    }
+
+    #[test]
+    fn test_parse_file_go_broken_syntax_partial_tree() {
+        let lang = get_language("go").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "func broken(").unwrap();
+        writeln!(file, "    ???").unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok());
+        let (tree, _source) = result.unwrap();
+        assert_eq!(tree.root_node().kind(), "source_file");
+        assert!(tree.root_node().has_error());
+        drop(tree);
     }
 }

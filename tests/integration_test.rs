@@ -666,7 +666,8 @@ fn test_typescript_class_declaration_capture() {
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
-    let query = compile_query(&lang, "(class_declaration name: (type_identifier) @class_name)").unwrap();
+    let query =
+        compile_query(&lang, "(class_declaration name: (type_identifier) @class_name)").unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let results = extract_matches(&tree, &source, &query, &fixture);
@@ -806,4 +807,266 @@ fn test_js_grammar_rejects_typescript_node_type() {
         result.is_err(),
         "interface_declaration is TypeScript-only and must fail against JS grammar"
     );
+}
+
+#[test]
+fn test_go_function_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.go");
+    let lang = get_language("go").unwrap();
+    let query = compile_query(&lang, "(function_declaration name: (identifier) @fn_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(names.contains("greet"), "must find 'greet'");
+    assert!(names.contains("add"), "must find 'add'");
+    assert!(names.contains("multiply"), "must find 'multiply'");
+    assert!(!names.contains("area"), "method must not match function_declaration");
+}
+
+#[test]
+fn test_go_function_exact_positions() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.go");
+    let lang = get_language("go").unwrap();
+    let query = compile_query(&lang, "(function_declaration name: (identifier) @fn_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    let greet = results.iter().find(|r| r.matched_text == "greet").unwrap();
+    assert_eq!(greet.start_line, 5);
+    assert_eq!(greet.start_col, 5);
+    assert_eq!(greet.end_col, 10);
+
+    let add = results.iter().find(|r| r.matched_text == "add").unwrap();
+    assert_eq!(add.start_line, 9);
+    assert_eq!(add.start_col, 5);
+    assert_eq!(add.end_col, 8);
+
+    let multiply = results.iter().find(|r| r.matched_text == "multiply").unwrap();
+    assert_eq!(multiply.start_line, 13);
+    assert_eq!(multiply.start_col, 5);
+    assert_eq!(multiply.end_col, 13);
+}
+
+#[test]
+fn test_go_struct_type_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.go");
+    let lang = get_language("go").unwrap();
+    let query =
+        compile_query(&lang, "(type_declaration (type_spec name: (type_identifier) @type_name))")
+            .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    let names: std::collections::HashSet<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(names.contains("Point"));
+    assert!(names.contains("Rectangle"));
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn test_go_eq_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.go");
+    let lang = get_language("go").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_declaration name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "add");
+    assert_eq!(results[0].start_line, 9);
+}
+
+#[test]
+fn test_go_match_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.go");
+    let lang = get_language("go").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_declaration name: (identifier) @fn_name (#match? @fn_name "^(add|multiply)$"))"#,
+    ).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert_eq!(results.len(), 2);
+    assert!(names.contains("add"));
+    assert!(names.contains("multiply"));
+    assert!(!names.contains("greet"));
+}
+
+#[test]
+fn test_go_walker_finds_go_files_only() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("main.go"), b"package main\nfunc main() {}").unwrap();
+    fs::write(dir.path().join("util.go"), b"package main\nfunc util() {}").unwrap();
+    fs::write(dir.path().join("lib.rs"), b"fn lib() {}").unwrap();
+    fs::write(dir.path().join("script.py"), b"def script(): pass").unwrap();
+    fs::write(dir.path().join("app.js"), b"function app() {}").unwrap();
+
+    let entries: Vec<_> =
+        build_walker(dir.path(), &Language::Go).collect::<Result<Vec<_>, _>>().unwrap();
+
+    let names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+
+    assert!(names.contains("main.go"));
+    assert!(names.contains("util.go"));
+    assert!(!names.contains("lib.rs"));
+    assert!(!names.contains("script.py"));
+    assert!(!names.contains("app.js"));
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn test_go_and_rust_results_do_not_mix() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let go_fixture = fixtures_dir().join("simple.go");
+    let rust_fixture = fixtures_dir().join("simple.rs");
+
+    let go_lang = get_language("go").unwrap();
+    let rust_lang = get_language("rust").unwrap();
+
+    let (go_tree, go_src) = parse_file(&go_fixture, &go_lang).unwrap();
+    let go_query =
+        compile_query(&go_lang, "(function_declaration name: (identifier) @fn_name)").unwrap();
+    let go_results = extract_matches(&go_tree, &go_src, &go_query, &go_fixture);
+    drop(go_tree);
+    drop(go_src);
+
+    let (rs_tree, rs_src) = parse_file(&rust_fixture, &rust_lang).unwrap();
+    let rust_query =
+        compile_query(&rust_lang, "(function_item name: (identifier) @fn_name)").unwrap();
+    let rust_results = extract_matches(&rs_tree, &rs_src, &rust_query, &rust_fixture);
+    drop(rs_tree);
+    drop(rs_src);
+
+    for r in &go_results {
+        assert_eq!(r.file_path, go_fixture);
+    }
+    for r in &rust_results {
+        assert_eq!(r.file_path, rust_fixture);
+    }
+
+    assert!(!go_results.is_empty());
+    assert!(!rust_results.is_empty());
+}
+
+#[test]
+fn test_go_grammar_rejects_rust_node_type() {
+    use ast_search::parser::get_language;
+    use ast_search::query::compile_query;
+
+    let go_lang = get_language("go").unwrap();
+    let result = compile_query(&go_lang, "(function_item name: (identifier) @fn_name)");
+    assert!(
+        result.is_err(),
+        "function_item is Rust-only and must fail to compile against Go grammar"
+    );
+}
+
+#[test]
+fn test_all_five_languages_compile_queries() {
+    use ast_search::parser::get_language;
+    use ast_search::query::compile_query;
+
+    let cases = vec![
+        ("rust", "(function_item name: (identifier) @fn_name)"),
+        ("python", "(function_definition name: (identifier) @fn_name)"),
+        ("js", "(function_declaration name: (identifier) @fn_name)"),
+        ("ts", "(function_declaration name: (identifier) @fn_name)"),
+        ("go", "(function_declaration name: (identifier) @fn_name)"),
+    ];
+
+    for (lang_str, query_str) in cases {
+        let lang = get_language(lang_str).unwrap();
+        let result = compile_query(&lang, query_str);
+        assert!(result.is_ok(), "query compile failed for lang={}: {:?}", lang_str, result.err());
+    }
+}
+
+#[test]
+fn test_all_five_languages_parse_minimal_source() {
+    use ast_search::parser::{get_language, parse_file};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("rust", "fn main() {}", "source_file"),
+        ("python", "def main(): pass", "module"),
+        ("js", "function main() {}", "program"),
+        ("ts", "function main(): void {}", "program"),
+        ("go", "package main\nfunc main() {}", "source_file"),
+    ];
+
+    for (lang_str, source, expected_root_kind) in cases {
+        let lang = get_language(lang_str).unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let result = parse_file(file.path(), &lang);
+        assert!(result.is_ok(), "parse failed for lang={}: {:?}", lang_str, result.err());
+        let (tree, src) = result.unwrap();
+        assert_eq!(
+            tree.root_node().kind(),
+            expected_root_kind,
+            "wrong root node kind for lang={}",
+            lang_str
+        );
+        assert!(!tree.root_node().has_error(), "unexpected parse errors for lang={}", lang_str);
+        drop(tree);
+        drop(src);
+    }
 }
