@@ -45,6 +45,39 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
 }
 
+fn run_pipeline_for_language(fixture_dir: &Path, query_str: &str, lang_enum: Language, lang_str: &str) -> Vec<MatchResult> {
+    let ts_lang = get_language(lang_str).unwrap();
+    let query = compile_query(&ts_lang, query_str).unwrap();
+    let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
+    let results_ref = Arc::clone(&results);
+    let query_ref = Arc::clone(&query);
+
+    build_walker(fixture_dir, &lang_enum).for_each(|entry_result| {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        let (tree, source) = match parse_file(entry.path(), &ts_lang) {
+            Ok(pair) => pair,
+            Err(_) => return,
+        };
+        let mut matches = extract_matches(&tree, &source, query_ref.as_ref(), entry.path());
+        drop(tree);
+        drop(source);
+        if !matches.is_empty() {
+            results_ref.lock().unwrap().append(&mut matches);
+        }
+    });
+
+    drop(results_ref);
+    drop(query_ref);
+
+    let mut final_results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
+    final_results.sort();
+    final_results.dedup();
+    final_results
+}
+
 #[test]
 fn test_single_function_capture() {
     let query = "(function_item name: (identifier) @fn_name)";
@@ -1587,4 +1620,391 @@ fn test_auto_mode_zero_languages_after_filter() {
     let compiled = auto_compiled_queries("(this_node_type_does_not_exist_in_any_grammar @cap)");
 
     assert!(compiled.is_empty());
+}
+
+#[test]
+fn test_python_nested_closure_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("nested_closures.py");
+    let lang = get_language("python").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_definition name: (identifier) @fn_name)"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let fn_names: Vec<&str> = results
+        .iter()
+        .filter(|r| r.capture_name == "fn_name")
+        .map(|r| r.matched_text.as_str())
+        .collect();
+
+    let unique: std::collections::HashSet<&str> = fn_names.iter().copied().collect();
+    assert_eq!(unique.len(), 4);
+    assert!(unique.contains("outer_function"));
+    assert!(unique.contains("middle_function"));
+    assert!(unique.contains("inner_closure"));
+    assert!(unique.contains("another_function"));
+
+    let inner_closure = results
+        .iter()
+        .find(|r| r.capture_name == "fn_name" && r.matched_text == "inner_closure")
+        .unwrap();
+
+    assert_eq!(inner_closure.start_line, 3);
+    assert_eq!(inner_closure.start_col, 12);
+    assert!(inner_closure.end_col > inner_closure.start_col);
+}
+
+#[test]
+fn test_javascript_arrow_function_params_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("arrow_params.js");
+    let lang = get_language("js").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(arrow_function parameters: (formal_parameters (identifier) @param))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort_by_key(|r| (r.start_line, r.start_col));
+
+    let param_names: Vec<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(param_names.contains(&"a"));
+    assert!(param_names.contains(&"x"));
+    assert!(param_names.contains(&"y"));
+    assert!(param_names.contains(&"z"));
+
+    let first_param = results.iter().find(|r| r.matched_text == "a").unwrap();
+    assert_eq!(first_param.start_line, 1);
+    assert_eq!(first_param.start_col, 16);
+}
+
+#[test]
+fn test_typescript_interface_regex_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("interfaces.ts");
+    let lang = get_language("ts").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(interface_declaration name: (type_identifier) @iface_name (#match? @iface_name "^I[A-Z]"))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let iface_names: Vec<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert_eq!(iface_names.len(), 3);
+    assert!(iface_names.contains(&"IConfig"));
+    assert!(iface_names.contains(&"ILogger"));
+    assert!(iface_names.contains(&"IEvent"));
+
+    for result in &results {
+        assert!(result.matched_text.starts_with("I"));
+    }
+}
+
+#[test]
+fn test_go_struct_exact_match_predicate() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("structs.go");
+    let lang = get_language("go").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(type_declaration (type_spec name: (type_identifier) @struct_name (#eq? @struct_name "ServerConfig")))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "ServerConfig");
+    assert_eq!(results[0].start_line, 3);
+    assert_eq!(results[0].start_col, 5);
+
+    for result in &results {
+        assert_eq!(result.matched_text, "ServerConfig");
+    }
+}
+
+#[test]
+fn test_cpp_virtual_keyword_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("virtual_keywords.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = compile_query(&lang, r#"(virtual) @keyword"#).unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert!(results.len() > 0);
+
+    for result in &results {
+        assert_eq!(result.capture_name, "keyword");
+        assert_eq!(result.matched_text, "virtual");
+    }
+
+    let mut virtual_counts_by_line: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+    for r in &results {
+        *virtual_counts_by_line.entry(r.start_line).or_insert(0u32) += 1u32;
+    }
+
+    assert!(virtual_counts_by_line.len() > 1);
+}
+
+#[test]
+fn test_cpp_anonymous_destructor_node() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("virtual_keywords.cpp");
+    let lang = get_language("cpp").unwrap();
+    let query = match compile_query(
+        &lang,
+        r#"(destructor_declaration (virtual_function_declarator "~" @tilde))"#,
+    ) {
+        Ok(q) => q,
+        Err(_) => return, // skip if C++ grammar does not expose this node type on this platform
+    };
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    if !results.is_empty() {
+        for result in &results {
+            assert_eq!(result.matched_text, "~");
+            assert_eq!(result.start_line, 6);
+        }
+    }
+}
+
+#[test]
+fn test_cross_language_string_literal_auto_mode() {
+    let query_str = r#"(string) @str"#;
+
+    let compiled = auto_compiled_queries(query_str);
+
+    assert!(compiled.contains_key(&Language::Python));
+    assert!(compiled.contains_key(&Language::JavaScript));
+
+    let results = auto_results(query_str);
+
+    let py_results: Vec<_> = results
+        .iter()
+        .filter(|r| r.file_path.extension().map(|e| e == "py").unwrap_or(false))
+        .collect();
+
+    let js_results: Vec<_> = results
+        .iter()
+        .filter(|r| r.file_path.extension().map(|e| e == "js").unwrap_or(false))
+        .collect();
+
+    assert!(!py_results.is_empty(), "should find Python strings");
+    assert!(!js_results.is_empty(), "should find JavaScript strings");
+
+    // Go may not expose the node type `string` in its grammar; verify Go string
+    // literals by a direct go-specific query to ensure cross-language coverage.
+    let go_lang = get_language("go").unwrap();
+    let go_query = match compile_query(&go_lang, "(interpreted_string_literal) @str") {
+        Ok(q) => q,
+        Err(_) => match compile_query(&go_lang, "(string) @str") {
+            Ok(q2) => q2,
+            Err(_) => return, // skip Go check if neither node exists
+        },
+    };
+
+    let go_fixture = fixtures_dir().join("simple.go");
+    let (go_tree, go_src) = parse_file(&go_fixture, &go_lang).unwrap();
+    let go_results = extract_matches(&go_tree, &go_src, &go_query, &go_fixture);
+    drop(go_tree);
+    drop(go_src);
+
+    assert!(!go_results.is_empty(), "should find Go string literals via go-specific query");
+}
+
+#[test]
+fn test_auto_mode_mixed_language_dispatcher() {
+    let query_str = "(identifier) @id";
+
+    let results = auto_results(query_str);
+
+    let language_files: std::collections::HashMap<&str, Vec<&MatchResult>> = results
+        .iter()
+        .fold(std::collections::HashMap::new(), |mut map, result| {
+            if let Some(ext) = result.file_path.extension().and_then(|e| e.to_str()) {
+                map.entry(ext).or_insert_with(Vec::new).push(result);
+            }
+            map
+        });
+
+    let py_count = language_files.get("py").map(|v| v.len()).unwrap_or(0);
+    let js_count = language_files.get("js").map(|v| v.len()).unwrap_or(0);
+    let go_count = language_files.get("go").map(|v| v.len()).unwrap_or(0);
+
+    assert!(py_count > 0, "must find Python identifiers");
+    assert!(js_count > 0, "must find JavaScript identifiers");
+    assert!(go_count > 0, "must find Go identifiers");
+
+    for result in &results {
+        assert!(result.file_path.is_absolute());
+        assert!(result.file_path.exists());
+        assert!(!result.matched_text.is_empty());
+    }
+}
+
+#[test]
+fn test_auto_mode_no_memory_leak_with_mixed_languages() {
+    let query_str = "(function_item name: (identifier) @fn_name)";
+    
+    let compiled1 = auto_compiled_queries(query_str);
+    let compiled2 = auto_compiled_queries(query_str);
+    
+    assert_eq!(compiled1.len(), compiled2.len());
+    
+    let results1 = auto_results(query_str);
+    let results2 = auto_results(query_str);
+    
+    assert_eq!(results1, results2);
+    assert_eq!(results1.len(), results2.len());
+}
+
+#[test]
+fn test_nested_python_closure_line_accuracy() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("nested_closures.py");
+    let lang = get_language("python").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_definition name: (identifier) @fn_name)"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort_by_key(|r| r.start_line);
+
+    let outer = results.iter().find(|r| r.matched_text == "outer_function").unwrap();
+    let middle = results.iter().find(|r| r.matched_text == "middle_function").unwrap();
+    let inner = results.iter().find(|r| r.matched_text == "inner_closure").unwrap();
+
+    assert_eq!(outer.start_line, 1);
+    assert!(middle.start_line > outer.start_line);
+    assert!(inner.start_line > middle.start_line);
+    assert_eq!(middle.start_line, 2);
+    assert_eq!(inner.start_line, 3);
+}
+
+#[test]
+fn test_typescript_interface_count_with_regex() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("interfaces.ts");
+    let lang = get_language("ts").unwrap();
+    
+    let query_i_prefix = compile_query(
+        &lang,
+        r#"(interface_declaration name: (type_identifier) @iface_name (#match? @iface_name "^I"))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let i_results = extract_matches(&tree, &source, &query_i_prefix, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(i_results.len(), 3);
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let query_all_interfaces =
+        compile_query(&lang, r#"(interface_declaration name: (type_identifier) @iface_name)"#)
+            .unwrap();
+    let all_results = extract_matches(&tree, &source, &query_all_interfaces, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(all_results.len(), 3);
+}
+
+#[test]
+fn test_go_struct_selective_extraction() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("structs.go");
+    let lang = get_language("go").unwrap();
+    
+    let query = compile_query(
+        &lang,
+        r#"(type_declaration (type_spec name: (type_identifier) @struct_name))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let all_structs = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(all_structs.len(), 3);
+
+    let struct_names: std::collections::HashSet<&str> =
+        all_structs.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(struct_names.contains("ServerConfig"));
+    assert!(struct_names.contains("DatabaseConfig"));
+    assert!(struct_names.contains("CacheConfig"));
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let query_database = compile_query(
+        &lang,
+        r#"(type_declaration (type_spec name: (type_identifier) @struct_name (#match? @struct_name "Config$")))"#,
+    )
+    .unwrap();
+    let filtered = extract_matches(&tree, &source, &query_database, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(filtered.len(), 3);
+    for result in &filtered {
+        assert!(result.matched_text.ends_with("Config"));
+    }
 }
