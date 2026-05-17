@@ -84,7 +84,8 @@ mod tests {
 
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
-        parse_file(file.path(), &crate::parser::get_language("rust").unwrap()).expect("inline parse failed")
+        parse_file(file.path(), &crate::parser::get_language("rust").unwrap())
+            .expect("inline parse failed")
     }
 
     fn dummy_path() -> PathBuf {
@@ -283,7 +284,11 @@ mod tests {
                     write!(f, "{}", src_owned).expect("writing tempfile");
 
                     // parse_file may fail only if the tempfile cannot be read; expect is appropriate in tests
-                    let (tree, ssrc) = crate::parser::parse_file(f.path(), &crate::parser::get_language("rust").unwrap()).expect("parse_file");
+                    let (tree, ssrc) = crate::parser::parse_file(
+                        f.path(),
+                        &crate::parser::get_language("rust").unwrap(),
+                    )
+                    .expect("parse_file");
                     let results = extract_matches(&tree, &ssrc, &*q_cl, f.path());
                     let cnt = results.len();
                     drop(tree);
@@ -331,7 +336,9 @@ mod tests {
         let results: Vec<crate::types::MatchResult> = paths
             .par_iter()
             .map(|p| {
-                let (tree, src) = crate::parser::parse_file(p, &crate::parser::get_language("rust").unwrap()).expect("parse_file");
+                let (tree, src) =
+                    crate::parser::parse_file(p, &crate::parser::get_language("rust").unwrap())
+                        .expect("parse_file");
                 let res = extract_matches(&tree, &src, &*query, p);
                 drop(tree);
                 drop(src);
@@ -679,7 +686,8 @@ fn reconnect() {}
                 use tempfile::NamedTempFile;
                 let mut f = NamedTempFile::new().unwrap();
                 write!(f, "{}", source2).unwrap();
-                crate::parser::parse_file(f.path(), &crate::parser::get_language("rust").unwrap()).unwrap()
+                crate::parser::parse_file(f.path(), &crate::parser::get_language("rust").unwrap())
+                    .unwrap()
             };
             let results = extract_matches(&tree, &src, &query2, &PathBuf::from("b.rs"));
             drop(tree);

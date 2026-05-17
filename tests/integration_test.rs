@@ -354,20 +354,15 @@ fn test_python_function_name_capture() {
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(
-        &lang,
-        "(function_definition name: (identifier) @fn_name)",
-    ).unwrap();
+    let query = compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let results = extract_matches(&tree, &source, &query, &fixture);
     drop(tree);
     drop(source);
 
-    let names: std::collections::HashSet<&str> = results
-        .iter()
-        .map(|r| r.matched_text.as_str())
-        .collect();
+    let names: std::collections::HashSet<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
 
     assert_eq!(names.len(), 3);
     assert!(names.contains("greet"));
@@ -382,10 +377,7 @@ fn test_python_function_line_numbers() {
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(
-        &lang,
-        "(function_definition name: (identifier) @fn_name)",
-    ).unwrap();
+    let query = compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let mut results = extract_matches(&tree, &source, &query, &fixture);
@@ -416,25 +408,20 @@ fn test_python_function_line_numbers() {
 fn test_python_walker_finds_py_files() {
     use ast_search::types::Language;
     use ast_search::walker::build_walker;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("script.py"), b"def foo(): pass").unwrap();
-    fs::write(dir.path().join("lib.py"),    b"def bar(): pass").unwrap();
-    fs::write(dir.path().join("main.rs"),   b"fn main() {}").unwrap();
+    fs::write(dir.path().join("lib.py"), b"def bar(): pass").unwrap();
+    fs::write(dir.path().join("main.rs"), b"fn main() {}").unwrap();
 
-    let entries: Vec<_> = build_walker(dir.path(), &Language::Python)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+    let entries: Vec<_> =
+        build_walker(dir.path(), &Language::Python).collect::<Result<Vec<_>, _>>().unwrap();
 
     let names: Vec<String> = entries
         .iter()
-        .filter_map(|e| {
-            e.path()
-             .file_name()
-             .map(|n| n.to_string_lossy().into_owned())
-        })
+        .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
         .collect();
 
     assert!(names.contains(&"script.py".to_string()));
@@ -447,24 +434,19 @@ fn test_python_walker_finds_py_files() {
 fn test_python_walker_includes_pyi_stubs() {
     use ast_search::types::Language;
     use ast_search::walker::build_walker;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("module.pyi"), b"def foo(x: int) -> str: ...").unwrap();
-    fs::write(dir.path().join("lib.py"),     b"def bar(): pass").unwrap();
+    fs::write(dir.path().join("lib.py"), b"def bar(): pass").unwrap();
 
-    let entries: Vec<_> = build_walker(dir.path(), &Language::Python)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+    let entries: Vec<_> =
+        build_walker(dir.path(), &Language::Python).collect::<Result<Vec<_>, _>>().unwrap();
 
     let names: Vec<String> = entries
         .iter()
-        .filter_map(|e| {
-            e.path()
-             .file_name()
-             .map(|n| n.to_string_lossy().into_owned())
-        })
+        .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
         .collect();
 
     assert!(names.contains(&"module.pyi".to_string()));
@@ -481,7 +463,8 @@ fn test_python_eq_predicate() {
     let query = compile_query(
         &lang,
         r#"(function_definition name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let results = extract_matches(&tree, &source, &query, &fixture);
@@ -498,33 +481,25 @@ fn test_rust_and_python_results_do_not_mix() {
     use ast_search::parser::{get_language, parse_file};
     use ast_search::query::{compile_query, extract_matches};
 
-    let rust_fixture   = fixtures_dir().join("simple.rs");
+    let rust_fixture = fixtures_dir().join("simple.rs");
     let python_fixture = fixtures_dir().join("simple.py");
 
-    let rust_lang   = get_language("rust").unwrap();
+    let rust_lang = get_language("rust").unwrap();
     let python_lang = get_language("python").unwrap();
 
-    let rust_query = compile_query(
-        &rust_lang,
-        "(function_item name: (identifier) @fn_name)",
-    ).unwrap();
+    let rust_query =
+        compile_query(&rust_lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
-    let python_query = compile_query(
-        &python_lang,
-        "(function_definition name: (identifier) @fn_name)",
-    ).unwrap();
+    let python_query =
+        compile_query(&python_lang, "(function_definition name: (identifier) @fn_name)").unwrap();
 
     let (rust_tree, rust_src) = parse_file(&rust_fixture, &rust_lang).unwrap();
-    let rust_results = extract_matches(
-        &rust_tree, &rust_src, &rust_query, &rust_fixture,
-    );
+    let rust_results = extract_matches(&rust_tree, &rust_src, &rust_query, &rust_fixture);
     drop(rust_tree);
     drop(rust_src);
 
     let (py_tree, py_src) = parse_file(&python_fixture, &python_lang).unwrap();
-    let py_results = extract_matches(
-        &py_tree, &py_src, &python_query, &python_fixture,
-    );
+    let py_results = extract_matches(&py_tree, &py_src, &python_query, &python_fixture);
     drop(py_tree);
     drop(py_src);
 
@@ -533,10 +508,8 @@ fn test_rust_and_python_results_do_not_mix() {
 
     assert_eq!(py_results.len(), 3);
 
-    let py_names: std::collections::HashSet<&str> = py_results
-        .iter()
-        .map(|r| r.matched_text.as_str())
-        .collect();
+    let py_names: std::collections::HashSet<&str> =
+        py_results.iter().map(|r| r.matched_text.as_str()).collect();
 
     assert!(py_names.contains("greet"));
     assert!(py_names.contains("add"));
@@ -548,4 +521,289 @@ fn test_rust_and_python_results_do_not_mix() {
     for rr in &rust_results {
         assert_ne!(rr.file_path, python_fixture);
     }
+}
+
+#[test]
+fn test_javascript_function_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.js");
+    let lang = get_language("js").unwrap();
+    let query = compile_query(&lang, "(function_declaration name: (identifier) @fn_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    let names: std::collections::HashSet<&str> =
+        results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(names.contains("greet"), "must find 'greet'");
+    assert!(names.contains("add"), "must find 'add'");
+    assert!(!names.contains("multiply"), "arrow fn must not match function_declaration");
+}
+
+#[test]
+fn test_javascript_class_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.js");
+    let lang = get_language("js").unwrap();
+    let query = compile_query(&lang, "(class_declaration name: (identifier) @class_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Calculator");
+    assert_eq!(results[0].start_line, 11);
+    assert_eq!(results[0].start_col, 6);
+    assert_eq!(results[0].end_col, 16);
+}
+
+#[test]
+fn test_javascript_function_name_exact_position() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.js");
+    let lang = get_language("js").unwrap();
+    let query = compile_query(
+        &lang,
+        r#"(function_declaration name: (identifier) @fn_name (#eq? @fn_name "greet"))"#,
+    )
+    .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "greet");
+    assert_eq!(results[0].start_line, 1);
+    assert_eq!(results[0].start_col, 9);
+    assert_eq!(results[0].end_col, 14);
+}
+
+#[test]
+fn test_typescript_function_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.ts");
+    let lang = get_language("ts").unwrap();
+    let query = compile_query(&lang, "(function_declaration name: (identifier) @fn_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    results.sort();
+
+    let names: Vec<&str> = results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert_eq!(names.len(), 2);
+    assert!(names.contains(&"greet"));
+    assert!(names.contains(&"add"));
+}
+
+#[test]
+fn test_typescript_interface_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.ts");
+    let lang = get_language("ts").unwrap();
+    let query =
+        compile_query(&lang, "(interface_declaration name: (type_identifier) @interface_name)")
+            .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Shape");
+    assert_eq!(results[0].start_line, 9);
+    assert_eq!(results[0].start_col, 10);
+    assert_eq!(results[0].end_col, 15);
+}
+
+#[test]
+fn test_typescript_type_alias_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.ts");
+    let lang = get_language("ts").unwrap();
+    let query = compile_query(&lang, "(type_alias_declaration name: (type_identifier) @type_name)")
+        .unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Point");
+    assert_eq!(results[0].start_line, 26);
+    assert_eq!(results[0].start_col, 5);
+    assert_eq!(results[0].end_col, 10);
+}
+
+#[test]
+fn test_typescript_class_declaration_capture() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let fixture = fixtures_dir().join("simple.ts");
+    let lang = get_language("ts").unwrap();
+    let query = compile_query(&lang, "(class_declaration name: (type_identifier) @class_name)").unwrap();
+
+    let (tree, source) = parse_file(&fixture, &lang).unwrap();
+    let results = extract_matches(&tree, &source, &query, &fixture);
+    drop(tree);
+    drop(source);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].matched_text, "Circle");
+    assert_eq!(results[0].start_line, 14);
+    assert_eq!(results[0].start_col, 6);
+    assert_eq!(results[0].end_col, 12);
+}
+
+#[test]
+fn test_javascript_walker_extensions() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("app.js"), b"function f() {}").unwrap();
+    fs::write(dir.path().join("mod.mjs"), b"export function g() {}").unwrap();
+    fs::write(dir.path().join("cjs.cjs"), b"module.exports = {}").unwrap();
+    fs::write(dir.path().join("index.ts"), b"function h(): void {}").unwrap();
+    fs::write(dir.path().join("main.rs"), b"fn main() {}").unwrap();
+
+    let entries: Vec<_> =
+        build_walker(dir.path(), &Language::JavaScript).collect::<Result<Vec<_>, _>>().unwrap();
+
+    let names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+
+    assert!(names.contains("app.js"));
+    assert!(names.contains("mod.mjs"));
+    assert!(names.contains("cjs.cjs"));
+    assert!(!names.contains("index.ts"));
+    assert!(!names.contains("main.rs"));
+    assert_eq!(entries.len(), 3);
+}
+
+#[test]
+fn test_typescript_walker_extensions() {
+    use ast_search::types::Language;
+    use ast_search::walker::build_walker;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("index.ts"), b"function f(): void {}").unwrap();
+    fs::write(dir.path().join("app.tsx"), b"function App() { return null; }").unwrap();
+    fs::write(dir.path().join("mod.mts"), b"export function g(): void {}").unwrap();
+    fs::write(dir.path().join("cts.cts"), b"module.exports = {}").unwrap();
+    fs::write(dir.path().join("script.js"), b"function h() {}").unwrap();
+    fs::write(dir.path().join("main.rs"), b"fn main() {}").unwrap();
+
+    let entries: Vec<_> =
+        build_walker(dir.path(), &Language::TypeScript).collect::<Result<Vec<_>, _>>().unwrap();
+
+    let names: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+
+    assert!(names.contains("index.ts"));
+    assert!(names.contains("app.tsx"));
+    assert!(names.contains("mod.mts"));
+    assert!(names.contains("cts.cts"));
+    assert!(!names.contains("script.js"));
+    assert!(!names.contains("main.rs"));
+    assert_eq!(entries.len(), 4);
+}
+
+#[test]
+fn test_js_and_ts_results_do_not_mix() {
+    use ast_search::parser::{get_language, parse_file};
+    use ast_search::query::{compile_query, extract_matches};
+
+    let js_fixture = fixtures_dir().join("simple.js");
+    let ts_fixture = fixtures_dir().join("simple.ts");
+
+    let js_lang = get_language("js").unwrap();
+    let ts_lang = get_language("ts").unwrap();
+
+    let query_str = "(function_declaration name: (identifier) @fn_name)";
+    let js_query = compile_query(&js_lang, query_str).unwrap();
+    let ts_query = compile_query(&ts_lang, query_str).unwrap();
+
+    let (js_tree, js_src) = parse_file(&js_fixture, &js_lang).unwrap();
+    let js_results = extract_matches(&js_tree, &js_src, &js_query, &js_fixture);
+    drop(js_tree);
+    drop(js_src);
+
+    let (ts_tree, ts_src) = parse_file(&ts_fixture, &ts_lang).unwrap();
+    let ts_results = extract_matches(&ts_tree, &ts_src, &ts_query, &ts_fixture);
+    drop(ts_tree);
+    drop(ts_src);
+
+    for r in &js_results {
+        assert_eq!(r.file_path, js_fixture);
+    }
+    for r in &ts_results {
+        assert_eq!(r.file_path, ts_fixture);
+    }
+
+    let js_names: std::collections::HashSet<&str> =
+        js_results.iter().map(|r| r.matched_text.as_str()).collect();
+    let ts_names: std::collections::HashSet<&str> =
+        ts_results.iter().map(|r| r.matched_text.as_str()).collect();
+
+    assert!(js_names.contains("greet"));
+    assert!(js_names.contains("add"));
+    assert!(ts_names.contains("greet"));
+    assert!(ts_names.contains("add"));
+}
+
+#[test]
+fn test_typescript_interface_query_compiles() {
+    use ast_search::parser::get_language;
+    use ast_search::query::compile_query;
+
+    let lang = get_language("ts").unwrap();
+    let result = compile_query(&lang, "(interface_declaration name: (type_identifier) @name)");
+    assert!(result.is_ok(), "interface_declaration query must compile against tsx grammar");
+}
+
+#[test]
+fn test_js_grammar_rejects_typescript_node_type() {
+    use ast_search::parser::get_language;
+    use ast_search::query::compile_query;
+
+    let js_lang = get_language("js").unwrap();
+    let result = compile_query(&js_lang, "(interface_declaration name: (type_identifier) @name)");
+    assert!(
+        result.is_err(),
+        "interface_declaration is TypeScript-only and must fail against JS grammar"
+    );
 }
