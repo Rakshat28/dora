@@ -1,9 +1,9 @@
 #![allow(clippy::module_name_repetitions)]
 
-use crate::types::{AppError, Result};
+use crate::types::{AppError, Language, Result};
 use std::cell::RefCell;
 use std::path::Path;
-use tree_sitter::{Language, Parser, Tree};
+use tree_sitter::{Language as TsLanguage, Parser, Tree};
 
 fn create_parser() -> Parser {
     Parser::new()
@@ -13,8 +13,8 @@ thread_local! {
     static PARSER: RefCell<Parser> = RefCell::new(create_parser());
 }
 
-#[allow(clippy::missing_errors_doc)]
-pub fn get_language(lang: &str) -> Result<Language> {
+#[allow(clippy::missing_errors_doc, dead_code)]
+pub fn get_language(lang: &str) -> Result<TsLanguage> {
     match lang {
         "rust" => Ok(tree_sitter_rust::language()),
         "python" => Ok(tree_sitter_python::language()),
@@ -57,6 +57,33 @@ pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree
     })?;
 
     Ok((tree, source))
+}
+
+pub fn detect_language(path: &Path) -> Option<Language> {
+    let ext = path.extension().and_then(|e| e.to_str())?.to_lowercase();
+
+    match ext.as_str() {
+        "rs" => Some(Language::Rust),
+        "py" | "pyi" => Some(Language::Python),
+        "js" | "mjs" | "cjs" => Some(Language::JavaScript),
+        "ts" | "mts" | "cts" | "tsx" => Some(Language::TypeScript),
+        "go" => Some(Language::Go),
+        "c" | "h" => Some(Language::C),
+        "cpp" | "cc" | "hpp" | "hxx" | "cxx" => Some(Language::Cpp),
+        _ => None,
+    }
+}
+
+pub fn get_all_languages() -> Vec<(Language, TsLanguage)> {
+    vec![
+        (Language::Rust, tree_sitter_rust::language()),
+        (Language::Python, tree_sitter_python::language()),
+        (Language::JavaScript, tree_sitter_javascript::language()),
+        (Language::TypeScript, tree_sitter_typescript::language_tsx()),
+        (Language::Go, tree_sitter_go::language()),
+        (Language::C, tree_sitter_c::language()),
+        (Language::Cpp, tree_sitter_cpp::language()),
+    ]
 }
 
 #[cfg(test)]
@@ -487,5 +514,97 @@ mod tests {
         assert_eq!(tree.root_node().kind(), "source_file");
         assert!(tree.root_node().has_error());
         drop(tree);
+    }
+
+    #[test]
+    fn test_detect_language_rust_extensions() {
+        assert_eq!(detect_language(Path::new("main.rs")), Some(Language::Rust));
+        assert_eq!(detect_language(Path::new("src/lib.rs")), Some(Language::Rust));
+    }
+
+    #[test]
+    fn test_detect_language_python_extensions() {
+        assert_eq!(detect_language(Path::new("script.py")), Some(Language::Python));
+        assert_eq!(detect_language(Path::new("stub.pyi")), Some(Language::Python));
+    }
+
+    #[test]
+    fn test_detect_language_javascript_extensions() {
+        assert_eq!(detect_language(Path::new("app.js")), Some(Language::JavaScript));
+        assert_eq!(detect_language(Path::new("mod.mjs")), Some(Language::JavaScript));
+        assert_eq!(detect_language(Path::new("cjs.cjs")), Some(Language::JavaScript));
+    }
+
+    #[test]
+    fn test_detect_language_typescript_extensions() {
+        assert_eq!(detect_language(Path::new("index.ts")), Some(Language::TypeScript));
+        assert_eq!(detect_language(Path::new("app.tsx")), Some(Language::TypeScript));
+        assert_eq!(detect_language(Path::new("mod.mts")), Some(Language::TypeScript));
+        assert_eq!(detect_language(Path::new("cts.cts")), Some(Language::TypeScript));
+    }
+
+    #[test]
+    fn test_detect_language_go_extensions() {
+        assert_eq!(detect_language(Path::new("main.go")), Some(Language::Go));
+    }
+
+    #[test]
+    fn test_detect_language_c_extensions() {
+        assert_eq!(detect_language(Path::new("main.c")), Some(Language::C));
+        assert_eq!(detect_language(Path::new("util.h")), Some(Language::C));
+    }
+
+    #[test]
+    fn test_detect_language_h_defaults_to_c() {
+        let result = detect_language(Path::new("types.h"));
+        assert_eq!(result, Some(Language::C));
+        assert_ne!(result, Some(Language::Cpp));
+    }
+
+    #[test]
+    fn test_detect_language_cpp_extensions() {
+        assert_eq!(detect_language(Path::new("app.cpp")), Some(Language::Cpp));
+        assert_eq!(detect_language(Path::new("lib.cc")), Some(Language::Cpp));
+        assert_eq!(detect_language(Path::new("types.hpp")), Some(Language::Cpp));
+        assert_eq!(detect_language(Path::new("util.hxx")), Some(Language::Cpp));
+        assert_eq!(detect_language(Path::new("mod.cxx")), Some(Language::Cpp));
+    }
+
+    #[test]
+    fn test_detect_language_unknown_extension() {
+        assert_eq!(detect_language(Path::new("README.md")), None);
+        assert_eq!(detect_language(Path::new("config.toml")), None);
+        assert_eq!(detect_language(Path::new("Makefile")), None);
+        assert_eq!(detect_language(Path::new("no_extension")), None);
+    }
+
+    #[test]
+    fn test_detect_language_case_insensitive() {
+        assert_eq!(detect_language(Path::new("Main.RS")), Some(Language::Rust));
+        assert_eq!(detect_language(Path::new("App.JS")), Some(Language::JavaScript));
+        assert_eq!(detect_language(Path::new("Lib.CPP")), Some(Language::Cpp));
+    }
+
+    #[test]
+    fn test_get_all_languages_returns_all_seven() {
+        let all = get_all_languages();
+        assert_eq!(all.len(), 7);
+
+        let lang_variants: Vec<&Language> = all.iter().map(|(lang, _)| lang).collect();
+        assert!(lang_variants.contains(&&Language::Rust));
+        assert!(lang_variants.contains(&&Language::Python));
+        assert!(lang_variants.contains(&&Language::JavaScript));
+        assert!(lang_variants.contains(&&Language::TypeScript));
+        assert!(lang_variants.contains(&&Language::Go));
+        assert!(lang_variants.contains(&&Language::C));
+        assert!(lang_variants.contains(&&Language::Cpp));
+    }
+
+    #[test]
+    fn test_get_all_languages_all_valid() {
+        for (_, ts_lang) in get_all_languages() {
+            let mut parser = tree_sitter::Parser::new();
+            assert!(parser.set_language(&ts_lang).is_ok());
+        }
     }
 }

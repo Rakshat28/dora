@@ -2,7 +2,7 @@
 #![warn(clippy::pedantic)]
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
@@ -20,10 +20,10 @@ mod types;
 pub mod walker;
 
 use output::{print_match, print_summary, resolve_color_mode, ColorMode};
-use parser::{get_language as get_ts_language, parse_file};
+use parser::{detect_language, get_all_languages, parse_file};
 use query::{compile_query, extract_matches};
-use types::{AppError, Language, MatchResult, SearchConfig};
-use walker::build_walker;
+use types::{AppError, LangMode, Language, MatchResult, SearchConfig};
+use walker::{build_auto_walker, build_walker};
 
 #[derive(Debug)]
 enum FileError {
@@ -103,8 +103,8 @@ struct Cli {
         short = 'l',
         long = "lang",
         value_name = "LANG",
-        default_value = "rust",
-        help = "Language to parse: rust, python, js, ts, go (default: rust)"
+        default_value = "auto",
+        help = "Language to parse: rust, python, js, ts, go, c, cpp, auto (default: auto)"
     )]
     lang: String,
 
@@ -171,10 +171,12 @@ impl Cli {
             ));
         }
 
-        let supported = ["rust", "python", "js", "ts", "go", "c", "cpp"];
+        let supported = ["rust", "python", "js", "ts", "go", "c", "cpp", "auto"];
         if !supported.contains(&self.lang.as_str()) {
             return Err(format!(
-                "unsupported language: '{}\n  supported languages: rust, python, js, ts, go, c, cpp\n  example: --lang rust",
+                "unsupported language: '{}'
+      supported languages: rust, python, js, ts, go, c, cpp, auto
+      example: --lang rust",
                 self.lang
             ));
         }
@@ -190,7 +192,59 @@ fn resolve_lang(lang_str: &str) -> Language {
         "js" => Language::JavaScript,
         "ts" => Language::TypeScript,
         "go" => Language::Go,
+        "c" => Language::C,
+        "cpp" => Language::Cpp,
         _ => unreachable!("validate() should have rejected lang: {}", lang_str),
+    }
+}
+
+fn resolve_lang_mode(lang_str: &str) -> LangMode {
+    match lang_str {
+        "auto" => LangMode::Auto,
+        other => LangMode::Single(resolve_lang(other)),
+    }
+}
+
+fn lang_to_ts_language(lang: &Language) -> tree_sitter::Language {
+    match lang {
+        Language::Rust => tree_sitter_rust::language(),
+        Language::Python => tree_sitter_python::language(),
+        Language::JavaScript => tree_sitter_javascript::language(),
+        Language::TypeScript => tree_sitter_typescript::language_tsx(),
+        Language::Go => tree_sitter_go::language(),
+        Language::C => tree_sitter_c::language(),
+        Language::Cpp => tree_sitter_cpp::language(),
+    }
+}
+
+fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<tree_sitter::Query>> {
+    match &config.lang_mode {
+        LangMode::Single(lang) => {
+            let ts_lang = lang_to_ts_language(lang);
+            match compile_query(&ts_lang, &config.query_str) {
+                Ok(query) => HashMap::from([(lang.clone(), query)]),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        LangMode::Auto => {
+            let mut map = HashMap::new();
+            for (lang, ts_lang) in get_all_languages() {
+                if let Ok(query) = compile_query(&ts_lang, &config.query_str) {
+                    map.insert(lang, query);
+                }
+            }
+            if map.is_empty() {
+                eprintln!(
+                        "error: query did not compile against any supported language\n  query: {}\n  hint: check the S-expression syntax and node type names",
+                        config.query_str
+                    );
+                process::exit(1);
+            }
+            map
+        }
     }
 }
 
@@ -229,8 +283,7 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
 #[allow(clippy::too_many_lines)]
 fn run_search(
     config: &SearchConfig,
-    query: &Arc<tree_sitter::Query>,
-    ts_lang: &tree_sitter::Language,
+    compiled_queries: &Arc<HashMap<Language, Arc<tree_sitter::Query>>>,
     color: &ColorMode,
     quiet: bool,
 ) -> SearchOutcome {
@@ -246,59 +299,77 @@ fn run_search(
     let files_walked_ref = Arc::clone(&files_walked_count);
     let files_parsed_ref = Arc::clone(&files_parsed_count);
     let files_skipped_ref = Arc::clone(&files_skipped_count);
-    let query_ref = Arc::clone(query);
+    let compiled_queries_ref = Arc::clone(compiled_queries);
 
-    build_walker(config.root_path.as_path(), &config.language).par_bridge().for_each(
-        move |entry_result| match entry_result {
-            Ok(entry) => {
-                *files_walked_ref
-                    .lock()
-                    .expect("files_walked Mutex was poisoned by a panicked thread") += 1;
+    let walker: Box<dyn Iterator<Item = crate::types::Result<ignore::DirEntry>> + Send> =
+        match &config.lang_mode {
+            LangMode::Single(lang) => Box::new(build_walker(config.root_path.as_path(), lang)),
+            LangMode::Auto => Box::new(build_auto_walker(config.root_path.as_path())),
+        };
 
-                match parse_file(entry.path(), ts_lang) {
-                    Ok((tree, source)) => {
-                        let matches =
-                            extract_matches(&tree, &source, query_ref.as_ref(), entry.path());
-                        drop(tree);
-                        drop(source);
+    walker.par_bridge().for_each(move |entry_result| match entry_result {
+        Ok(entry) => {
+            *files_walked_ref
+                .lock()
+                .expect("files_walked Mutex was poisoned by a panicked thread") += 1;
 
-                        let mut results_guard = results_ref
-                            .lock()
-                            .expect("results Mutex was poisoned by a panicked thread");
-                        results_guard.extend(matches);
+            let detected_lang = match &config.lang_mode {
+                LangMode::Single(lang) => lang.clone(),
+                LangMode::Auto => match detect_language(entry.path()) {
+                    Some(lang) => lang,
+                    None => return,
+                },
+            };
 
-                        let mut count_guard = files_parsed_ref
-                            .lock()
-                            .expect("files_parsed Mutex was poisoned by a panicked thread");
-                        *count_guard += 1;
-                    }
-                    Err(error) => {
-                        let file_error = match &error {
-                            AppError::IoError(_) => FileError::ReadFailure {
-                                path: entry.path().to_path_buf(),
-                                message: error.to_string(),
-                            },
-                            AppError::ParseError(_) => FileError::ParseFailure {
-                                path: entry.path().to_path_buf(),
-                                message: error.to_string(),
-                            },
-                            _ => FileError::ReadFailure {
-                                path: entry.path().to_path_buf(),
-                                message: format!("unexpected error: {error}"),
-                            },
-                        };
-                        handle_file_error(&file_error, &files_skipped_ref);
-                    }
+            let ts_query = match compiled_queries_ref.get(&detected_lang) {
+                Some(query) => Arc::clone(query),
+                None => return,
+            };
+
+            let ts_lang = lang_to_ts_language(&detected_lang);
+
+            match parse_file(entry.path(), &ts_lang) {
+                Ok((tree, source)) => {
+                    let matches = extract_matches(&tree, &source, ts_query.as_ref(), entry.path());
+                    drop(tree);
+                    drop(source);
+
+                    let mut results_guard = results_ref
+                        .lock()
+                        .expect("results Mutex was poisoned by a panicked thread");
+                    results_guard.extend(matches);
+
+                    let mut count_guard = files_parsed_ref
+                        .lock()
+                        .expect("files_parsed Mutex was poisoned by a panicked thread");
+                    *count_guard += 1;
+                }
+                Err(error) => {
+                    let file_error = match &error {
+                        AppError::IoError(_) => FileError::ReadFailure {
+                            path: entry.path().to_path_buf(),
+                            message: error.to_string(),
+                        },
+                        AppError::ParseError(_) => FileError::ParseFailure {
+                            path: entry.path().to_path_buf(),
+                            message: error.to_string(),
+                        },
+                        _ => FileError::ReadFailure {
+                            path: entry.path().to_path_buf(),
+                            message: format!("unexpected error: {error}"),
+                        },
+                    };
+                    handle_file_error(&file_error, &files_skipped_ref);
                 }
             }
-            Err(error) => {
-                handle_file_error(
-                    &FileError::WalkerAccess { path: None, message: error.to_string() },
-                    &files_skipped_ref,
-                );
-            }
-        },
-    );
+        }
+        Err(error) => {
+            handle_file_error(
+                &FileError::WalkerAccess { path: None, message: error.to_string() },
+                &files_skipped_ref,
+            );
+        }
+    });
 
     let mut final_results = {
         match Arc::try_unwrap(results) {
@@ -372,32 +443,15 @@ fn main() {
         process::exit(1);
     }
 
-    let walker_lang = resolve_lang(&cli.lang);
+    let lang_mode = resolve_lang_mode(&cli.lang);
 
-    let ts_lang = match get_ts_language(&cli.lang) {
-        Ok(lang) => lang,
-        Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
-        }
-    };
+    let config =
+        SearchConfig { query_str: cli.query.clone(), root_path: cli.path.clone(), lang_mode };
 
-    let config = SearchConfig {
-        query_str: cli.query.clone(),
-        root_path: cli.path.clone(),
-        language: walker_lang,
-    };
-
-    let query = match compile_query(&ts_lang, &config.query_str) {
-        Ok(query) => query,
-        Err(error) => {
-            eprintln!("error: {error}");
-            process::exit(1);
-        }
-    };
+    let compiled_queries = Arc::new(build_compiled_queries(&config));
 
     let started_at = Instant::now();
-    let outcome = run_search(&config, &query, &ts_lang, &color, cli.quiet);
+    let outcome = run_search(&config, &compiled_queries, &color, cli.quiet);
 
     let stdout = std::io::stdout();
     if !cli.quiet {
@@ -430,9 +484,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_file_error, handle_file_error, resolve_lang, Cli, FileError, SearchOutcome,
+        format_file_error, handle_file_error, resolve_lang, resolve_lang_mode, Cli, FileError,
+        SearchOutcome,
     };
-    use crate::types::Language;
+    use crate::types::{LangMode, Language};
     use clap_complete::Shell;
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -963,6 +1018,7 @@ mod tests {
         assert!(msg.contains("cobol"));
         assert!(msg.contains("rust"));
         assert!(msg.contains("python"));
+        assert!(msg.contains("auto"));
         assert!(msg.contains("example:"));
     }
 
@@ -982,7 +1038,7 @@ mod tests {
 
     #[test]
     fn test_validate_accepts_all_supported_languages() {
-        for lang in &["rust", "python", "js", "ts", "go", "c", "cpp"] {
+        for lang in &["rust", "python", "js", "ts", "go", "c", "cpp", "auto"] {
             let cli = Cli {
                 query: "(fn)".to_string(),
                 path: std::env::temp_dir(),
@@ -1037,6 +1093,12 @@ mod tests {
         assert_eq!(resolve_lang("go"), Language::Go);
         assert_eq!(resolve_lang("c"), Language::C);
         assert_eq!(resolve_lang("cpp"), Language::Cpp);
+    }
+
+    #[test]
+    fn test_resolve_lang_mode_auto() {
+        assert_eq!(resolve_lang_mode("auto"), LangMode::Auto);
+        assert_eq!(resolve_lang_mode("rust"), LangMode::Single(Language::Rust));
     }
 
     #[test]

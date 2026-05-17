@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Language {
     Rust,
     Python,
@@ -12,6 +12,12 @@ pub enum Language {
     Go,
     C,
     Cpp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LangMode {
+    Single(Language),
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -30,7 +36,7 @@ pub struct MatchResult {
 pub struct SearchConfig {
     pub query_str: String,
     pub root_path: PathBuf,
-    pub language: Language,
+    pub lang_mode: LangMode,
 }
 
 #[derive(Debug, Error)]
@@ -81,7 +87,7 @@ mod tests {
         let config = SearchConfig {
             query_str: "(function_item name: (identifier) @fn.name)".to_string(),
             root_path: PathBuf::from("/home/user/project"),
-            language: Language::Rust,
+            lang_mode: LangMode::Single(Language::Rust),
         };
 
         let cloned = config.clone();
@@ -95,9 +101,10 @@ mod tests {
         let base = SearchConfig {
             query_str: "fn main".to_string(),
             root_path: PathBuf::from("."),
-            language: Language::Rust,
+            lang_mode: LangMode::Single(Language::Rust),
         };
-        let different_lang = SearchConfig { language: Language::Python, ..base.clone() };
+        let different_lang =
+            SearchConfig { lang_mode: LangMode::Single(Language::Python), ..base.clone() };
 
         assert_ne!(base, different_lang);
     }

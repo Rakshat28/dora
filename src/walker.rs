@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use ignore::{DirEntry, WalkBuilder};
@@ -80,6 +81,47 @@ pub fn build_walker(root: &Path, lang: &Language) -> impl Iterator<Item = Result
                 let ext_matches =
                     entry.path().extension().and_then(|extension| extension.to_str()).is_some_and(
                         |extension| extensions.contains(&extension.to_lowercase().as_str()),
+                    );
+
+                if is_file && ext_matches && !is_binary(entry.path()) {
+                    Some(Ok(entry))
+                } else {
+                    None
+                }
+            }
+        })
+}
+
+pub fn build_auto_walker(root: &Path) -> impl Iterator<Item = Result<DirEntry>> {
+    let all_extensions: HashSet<&'static str> = [
+        Language::Rust,
+        Language::Python,
+        Language::JavaScript,
+        Language::TypeScript,
+        Language::Go,
+        Language::C,
+        Language::Cpp,
+    ]
+    .iter()
+    .flat_map(|lang| extensions_for_language(lang).iter().copied())
+    .collect();
+
+    WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .follow_links(false)
+        .filter_entry(|entry| !is_excluded_dir(entry))
+        .build()
+        .filter_map(move |result| match result {
+            Err(error) => Some(Err(AppError::WalkError(error))),
+            Ok(entry) => {
+                let is_file = entry.file_type().is_some_and(|ft| ft.is_file());
+                let ext_matches =
+                    entry.path().extension().and_then(|extension| extension.to_str()).is_some_and(
+                        |extension| all_extensions.contains(extension.to_lowercase().as_str()),
                     );
 
                 if is_file && ext_matches && !is_binary(entry.path()) {
@@ -199,6 +241,89 @@ mod tests {
                     lang
                 );
             }
+        }
+
+        #[test]
+        fn auto_walker_finds_mixed_language_files() {
+            let dir = TempDir::new().unwrap();
+            write_file(&dir, "main.rs", b"fn main() {}");
+            write_file(&dir, "script.py", b"def main(): pass");
+            write_file(&dir, "app.js", b"function app() {}");
+            write_file(&dir, "index.ts", b"function index(): void {}");
+            write_file(&dir, "main.go", b"package main\nfunc main() {}");
+            write_file(&dir, "util.c", b"void util() {}");
+            write_file(&dir, "lib.cpp", b"void lib() {}");
+            write_file(&dir, "README.md", b"# readme");
+            write_file(&dir, "config.toml", b"[package]");
+
+            let entries: Result<Vec<_>> = build_auto_walker(dir.path()).collect();
+            let entries = entries.expect("auto walk failed");
+
+            let names: std::collections::HashSet<String> = entries
+                .iter()
+                .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+
+            assert!(names.contains("main.rs"));
+            assert!(names.contains("script.py"));
+            assert!(names.contains("app.js"));
+            assert!(names.contains("index.ts"));
+            assert!(names.contains("main.go"));
+            assert!(names.contains("util.c"));
+            assert!(names.contains("lib.cpp"));
+            assert!(!names.contains("README.md"));
+            assert!(!names.contains("config.toml"));
+        }
+
+        #[test]
+        fn auto_walker_respects_gitignore() {
+            let dir = TempDir::new().unwrap();
+            fs::create_dir(dir.path().join(".git")).unwrap();
+            write_file(&dir, ".gitignore", b"ignored.rs\n");
+            write_file(&dir, "ignored.rs", b"fn ignored() {}");
+            write_file(&dir, "visible.rs", b"fn visible() {}");
+
+            let entries: Result<Vec<_>> = build_auto_walker(dir.path()).collect();
+            let names: Vec<String> = entries
+                .unwrap()
+                .iter()
+                .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+
+            assert!(!names.contains(&"ignored.rs".to_string()));
+            assert!(names.contains(&"visible.rs".to_string()));
+        }
+
+        #[test]
+        fn auto_walker_excludes_binary_files() {
+            let dir = TempDir::new().unwrap();
+            write_file(&dir, "binary.rs", &[0x00, 0x01, 0x02]);
+            write_file(&dir, "valid.rs", b"fn valid() {}");
+
+            let entries: Result<Vec<_>> = build_auto_walker(dir.path()).collect();
+            let names: Vec<String> = entries
+                .unwrap()
+                .iter()
+                .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+
+            assert!(!names.contains(&"binary.rs".to_string()));
+            assert!(names.contains(&"valid.rs".to_string()));
+        }
+
+        #[test]
+        fn auto_walker_finds_h_files() {
+            let dir = TempDir::new().unwrap();
+            write_file(&dir, "types.h", b"typedef struct { int x; } Point;");
+
+            let entries: Result<Vec<_>> = build_auto_walker(dir.path()).collect();
+            let names: Vec<String> = entries
+                .unwrap()
+                .iter()
+                .filter_map(|e| e.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+
+            assert!(names.contains(&"types.h".to_string()));
         }
 
         #[test]
