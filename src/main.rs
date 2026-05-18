@@ -21,7 +21,6 @@ pub mod walker;
 
 use output::{print_match, print_summary, resolve_color_mode, ColorMode};
 use parser::{detect_language, get_all_languages, parse_file};
-use query::{compile_query, extract_matches};
 use types::{AppError, LangMode, Language, MatchResult, SearchConfig};
 use walker::{build_auto_walker, build_walker};
 
@@ -76,9 +75,10 @@ struct Cli {
     #[arg(
         short = 'q',
         long = "query",
-        default_value = "",
+        required = true,
+        num_args = 1..,
         value_name = "S-EXPR",
-        help = "Tree-sitter S-expression query pattern (required)",
+        help = "Tree-sitter S-expression query (repeatable: -q QUERY1 -q QUERY2)",
         long_help = "An S-expression structural query in Tree-sitter syntax.\n\n\
                      Examples:\n\
                      \n  Find all function definitions:\n  \
@@ -88,7 +88,7 @@ struct Cli {
                      \n\n  Find all struct definitions:\n  \
                      (struct_item name: (type_identifier) @struct_name)"
     )]
-    query: String,
+    query: Vec<String>,
 
     #[arg(
         short = 'p',
@@ -153,8 +153,8 @@ impl Cli {
             return Ok(());
         }
 
-        if self.query.trim().is_empty() {
-            return Err("query must not be empty".to_string());
+        if self.query.iter().all(|q| q.trim().is_empty()) {
+            return Err("at least one query string must not be empty".to_string());
         }
 
         if !self.path.exists() {
@@ -217,11 +217,13 @@ fn lang_to_ts_language(lang: &Language) -> tree_sitter::Language {
     }
 }
 
-fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<query::CompiledQuery>> {
+fn build_compiled_queries(
+    config: &SearchConfig,
+) -> HashMap<Language, Arc<query::MultiCompiledQuery>> {
     match &config.lang_mode {
         LangMode::Single(lang) => {
             let ts_lang = lang_to_ts_language(lang);
-            match compile_query(&ts_lang, &config.query_str) {
+            match query::compile_multi_query(&ts_lang, &config.queries) {
                 Ok(compiled) => HashMap::from([(lang.clone(), compiled)]),
                 Err(error) => {
                     eprintln!("error: {error}");
@@ -232,14 +234,14 @@ fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<query:
         LangMode::Auto => {
             let mut map = HashMap::new();
             for (lang, ts_lang) in get_all_languages() {
-                if let Ok(compiled) = compile_query(&ts_lang, &config.query_str) {
+                if let Ok(compiled) = query::compile_multi_query(&ts_lang, &config.queries) {
                     map.insert(lang, compiled);
                 }
             }
             if map.is_empty() {
                 eprintln!(
                         "error: query did not compile against any supported language\n  query: {}\n  hint: check the S-expression syntax and node type names",
-                        config.query_str
+                        config.queries.join("\n  query: ")
                     );
                 process::exit(1);
             }
@@ -283,7 +285,7 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
 #[allow(clippy::too_many_lines)]
 fn run_search(
     config: &SearchConfig,
-    compiled_queries: &Arc<HashMap<Language, Arc<query::CompiledQuery>>>,
+    compiled_queries: &Arc<HashMap<Language, Arc<query::MultiCompiledQuery>>>,
     color: &ColorMode,
     quiet: bool,
 ) -> SearchOutcome {
@@ -330,7 +332,12 @@ fn run_search(
 
             match parse_file(entry.path(), &ts_lang) {
                 Ok((tree, source)) => {
-                    let matches = extract_matches(&tree, &source, ts_query.as_ref(), entry.path());
+                    let matches = query::extract_multi_matches(
+                        &tree,
+                        source.as_bytes(),
+                        ts_query.as_ref(),
+                        entry.path(),
+                    );
                     drop(tree);
                     drop(source);
 
@@ -446,7 +453,7 @@ fn main() {
     let lang_mode = resolve_lang_mode(&cli.lang);
 
     let config =
-        SearchConfig { query_str: cli.query.clone(), root_path: cli.path.clone(), lang_mode };
+        SearchConfig { queries: cli.query.clone(), root_path: cli.path.clone(), lang_mode };
 
     let compiled_queries = Arc::new(build_compiled_queries(&config));
 
@@ -583,7 +590,7 @@ mod tests {
     #[test]
     fn test_cli_validate_valid_path() {
         let cli = Cli {
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             path: std::env::temp_dir(),
             lang: "rust".to_string(),
             no_color: false,
@@ -598,7 +605,7 @@ mod tests {
     fn test_cli_validate_nonexistent_path() {
         let cli = Cli {
             path: PathBuf::from("/tmp/ast_search_nonexistent_xyz_12345"),
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
@@ -619,7 +626,7 @@ mod tests {
         let temp_file = NamedTempFile::new().expect("failed to create temp file for test");
         let cli = Cli {
             path: temp_file.path().to_path_buf(),
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
@@ -636,7 +643,7 @@ mod tests {
     fn test_cli_validate_empty_query() {
         let cli = Cli {
             path: std::env::temp_dir(),
-            query: "   ".to_string(),
+            query: vec!["   ".to_string()],
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
@@ -646,7 +653,7 @@ mod tests {
         let result = cli.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
-        assert_eq!(err_msg, "query must not be empty");
+        assert_eq!(err_msg, "at least one query string must not be empty");
     }
 
     #[test]
@@ -799,7 +806,7 @@ mod tests {
     #[test]
     fn test_stats_flag_defaults_false() {
         let cli = Cli {
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             path: std::env::temp_dir(),
             lang: "rust".to_string(),
             no_color: false,
@@ -813,7 +820,7 @@ mod tests {
     #[test]
     fn test_quiet_flag_defaults_false() {
         let cli = Cli {
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             path: std::env::temp_dir(),
             lang: "rust".to_string(),
             no_color: false,
@@ -920,7 +927,7 @@ mod tests {
     #[test]
     fn test_cli_validate_with_stats_field() {
         let cli = Cli {
-            query: "(function_item)".to_string(),
+            query: vec!["(function_item)".to_string()],
             path: std::env::temp_dir(),
             lang: "rust".to_string(),
             no_color: false,
@@ -934,7 +941,7 @@ mod tests {
     #[test]
     fn test_validate_skips_checks_for_generate_completions() {
         let cli = Cli {
-            query: "".to_string(),
+            query: vec!["".to_string()],
             path: PathBuf::from("/nonexistent/path/xyz"),
             lang: "cobol".to_string(),
             no_color: false,
@@ -948,7 +955,7 @@ mod tests {
     #[test]
     fn test_validate_rejects_empty_query() {
         let cli = Cli {
-            query: "   ".to_string(),
+            query: vec!["   ".to_string()],
             path: std::env::temp_dir(),
             lang: "rust".to_string(),
             no_color: false,
@@ -958,13 +965,13 @@ mod tests {
         };
         let result = cli.validate();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "query must not be empty");
+        assert_eq!(result.unwrap_err(), "at least one query string must not be empty");
     }
 
     #[test]
     fn test_validate_rejects_nonexistent_path_with_hint() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: PathBuf::from("/tmp/ast_search_nonexistent_xyz_99999"),
             lang: "rust".to_string(),
             no_color: false,
@@ -985,7 +992,7 @@ mod tests {
         use tempfile::NamedTempFile;
         let f = NamedTempFile::new().unwrap();
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: f.path().to_path_buf(),
             lang: "rust".to_string(),
             no_color: false,
@@ -1003,7 +1010,7 @@ mod tests {
     #[test]
     fn test_validate_rejects_unsupported_lang_with_hint() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: std::env::temp_dir(),
             lang: "cobol".to_string(),
             no_color: false,
@@ -1025,7 +1032,7 @@ mod tests {
     #[test]
     fn test_validate_lang_is_case_sensitive() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: std::env::temp_dir(),
             lang: "Rust".to_string(),
             no_color: false,
@@ -1040,7 +1047,7 @@ mod tests {
     fn test_validate_accepts_all_supported_languages() {
         for lang in &["rust", "python", "js", "ts", "go", "c", "cpp", "auto"] {
             let cli = Cli {
-                query: "(fn)".to_string(),
+                query: vec!["(fn)".to_string()],
                 path: std::env::temp_dir(),
                 lang: lang.to_string(),
                 no_color: false,
@@ -1055,7 +1062,7 @@ mod tests {
     #[test]
     fn test_validate_checks_query_before_path() {
         let cli = Cli {
-            query: "".to_string(),
+            query: vec!["".to_string()],
             path: PathBuf::from("/nonexistent/xyz"),
             lang: "rust".to_string(),
             no_color: false,
@@ -1065,13 +1072,13 @@ mod tests {
         };
         let result = cli.validate();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "query must not be empty");
+        assert_eq!(result.unwrap_err(), "at least one query string must not be empty");
     }
 
     #[test]
     fn test_validate_checks_path_before_lang() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: PathBuf::from("/nonexistent/xyz_abc"),
             lang: "cobol".to_string(),
             no_color: false,
@@ -1104,7 +1111,7 @@ mod tests {
     #[test]
     fn test_error_message_contains_newline_hint() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: PathBuf::from("/nonexistent/xyz_hint_test"),
             lang: "rust".to_string(),
             no_color: false,
@@ -1120,7 +1127,7 @@ mod tests {
     #[test]
     fn test_unsupported_lang_error_names_passed_value() {
         let cli = Cli {
-            query: "(fn)".to_string(),
+            query: vec!["(fn)".to_string()],
             path: std::env::temp_dir(),
             lang: "fortran77".to_string(),
             no_color: false,
