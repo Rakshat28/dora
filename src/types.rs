@@ -55,6 +55,14 @@ pub enum AppError {
 
     #[error("Language not supported: {0}")]
     LanguageNotSupported(String),
+    #[error("index file is corrupt or unreadable: {0}")]
+    IndexCorrupt(String),
+
+    #[error("index version mismatch: found {found}, expected {expected}")]
+    IndexVersionMismatch { found: u32, expected: u32 },
+
+    #[error("index root mismatch: index was built for {index_root}, searching {search_root}")]
+    IndexRootMismatch { index_root: PathBuf, search_root: PathBuf },
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
