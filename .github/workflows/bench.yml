@@ -11,6 +11,8 @@ jobs:
     name: Criterion Benchmarks
     runs-on: ubuntu-latest
     permissions:
+      contents: write
+      packages: write
       pull-requests: write
       issues: write
 
