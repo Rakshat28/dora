@@ -21,6 +21,7 @@ pub enum FileSource {
 
 impl FileSource {
     #[allow(dead_code)]
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             FileSource::Heap(s) => s.as_bytes(),
@@ -29,6 +30,7 @@ impl FileSource {
     }
 
     #[allow(dead_code)]
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             FileSource::Heap(s) => Some(s.as_str()),
@@ -42,8 +44,6 @@ impl AsRef<[u8]> for FileSource {
         self.as_bytes()
     }
 }
-
-const MMAP_THRESHOLD_BYTES: u64 = 1_024 * 1_024;
 
 #[allow(clippy::missing_errors_doc, dead_code)]
 pub fn get_language(lang: &str) -> Result<TsLanguage> {
@@ -61,7 +61,10 @@ pub fn get_language(lang: &str) -> Result<TsLanguage> {
     }
 }
 
-fn parse_file_with_threshold(
+pub const MMAP_THRESHOLD_BYTES: u64 = 1_024 * 1_024;
+
+#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+pub fn parse_file_with_threshold(
     path: &Path,
     language: &tree_sitter::Language,
     threshold: u64,
@@ -115,6 +118,7 @@ pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree
     parse_file_with_threshold(path, language, MMAP_THRESHOLD_BYTES)
 }
 
+#[must_use]
 pub fn detect_language(path: &Path) -> Option<Language> {
     let ext = path.extension().and_then(|e| e.to_str())?.to_lowercase();
 
@@ -130,6 +134,7 @@ pub fn detect_language(path: &Path) -> Option<Language> {
     }
 }
 
+#[must_use]
 pub fn get_all_languages() -> Vec<(Language, TsLanguage)> {
     vec![
         (Language::Rust, tree_sitter_rust::language()),

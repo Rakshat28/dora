@@ -1,0 +1,7 @@
+criterion default regression threshold: 2%
+
+custom thresholds per benchmark:
+compile_single_query_rust:            5%   (compilation has OS scheduling variance)
+parallel_search_100_files_20fn_each: 10%   (parallel benchmarks have high variance)
+single_file_parse_query/:            2%   (tight loop, low variance expected)
+parse_heap_vs_mmap/:                 2%   (I/O benchmark, SSD dependent)
