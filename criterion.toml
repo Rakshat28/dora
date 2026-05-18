@@ -1,0 +1,6 @@
+# criterion.toml
+[criterion]
+# Ignore performance changes smaller than 5%
+noise_threshold = 0.05 
+# Optional: Lower the confidence level slightly so it requires stronger proof to flag a regression
+confidence_level = 0.90 
