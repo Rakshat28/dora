@@ -1,12 +1,8 @@
-use ast_search::parser::{
-    get_language, parse_file_with_threshold, FileSource, MMAP_THRESHOLD_BYTES,
-};
+use ast_search::parser::{get_language, parse_file_with_threshold};
 use ast_search::query::{compile_multi_query, extract_multi_matches};
-use ast_search::walker::build_auto_walker;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tempfile::{NamedTempFile, TempDir};
 
 fn make_rust_source(fn_count: usize) -> String {
@@ -76,7 +72,7 @@ fn bench_single_file_parse_query(c: &mut Criterion) {
                 );
                 drop(tree);
                 drop(source);
-                results
+                black_box(results)
             });
         });
     }
@@ -98,6 +94,7 @@ fn bench_parse_heap_vs_mmap(c: &mut Criterion) {
                 parse_file_with_threshold(black_box(&path), black_box(&lang), u64::MAX).unwrap();
             drop(tree);
             drop(source);
+            black_box(())
         });
     });
 
@@ -107,6 +104,7 @@ fn bench_parse_heap_vs_mmap(c: &mut Criterion) {
                 parse_file_with_threshold(black_box(&path), black_box(&lang), 0).unwrap();
             drop(tree);
             drop(source);
+            black_box(())
         });
     });
 
@@ -136,23 +134,23 @@ fn bench_multi_query_overhead(c: &mut Criterion) {
 
     group.bench_function("one_query", |b| {
         b.iter(|| {
-            extract_multi_matches(
+            black_box(extract_multi_matches(
                 black_box(&tree),
                 black_box(source.as_bytes()),
                 black_box(&single),
                 black_box(&path),
-            )
+            ))
         });
     });
 
     group.bench_function("five_queries", |b| {
         b.iter(|| {
-            extract_multi_matches(
+            black_box(extract_multi_matches(
                 black_box(&tree),
                 black_box(source.as_bytes()),
                 black_box(&five),
                 black_box(&path),
-            )
+            ))
         });
     });
 
@@ -196,10 +194,11 @@ fn bench_parallel_search_100_files(c: &mut Criterion) {
                 results_ref.lock().unwrap().append(&mut matches);
             });
 
+            drop(results_ref);
             let mut final_results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
             final_results.sort();
             final_results.dedup();
-            final_results
+            black_box(final_results)
         });
     });
 
@@ -213,13 +212,18 @@ fn bench_query_compilation_all_languages(c: &mut Criterion) {
 
     c.bench_function("compile_universal_query_all_languages", |b| {
         b.iter(|| {
-            get_all_languages()
-                .into_iter()
-                .filter_map(|(_, ts_lang)| {
-                    compile_multi_query(black_box(&ts_lang), black_box(&[query_str.to_string()]))
+            black_box(
+                get_all_languages()
+                    .into_iter()
+                    .filter_map(|(_, ts_lang)| {
+                        compile_multi_query(
+                            black_box(&ts_lang),
+                            black_box(&[query_str.to_string()]),
+                        )
                         .ok()
-                })
-                .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            )
         });
     });
 }
