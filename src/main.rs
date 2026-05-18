@@ -217,12 +217,12 @@ fn lang_to_ts_language(lang: &Language) -> tree_sitter::Language {
     }
 }
 
-fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<tree_sitter::Query>> {
+fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<query::CompiledQuery>> {
     match &config.lang_mode {
         LangMode::Single(lang) => {
             let ts_lang = lang_to_ts_language(lang);
             match compile_query(&ts_lang, &config.query_str) {
-                Ok(query) => HashMap::from([(lang.clone(), query)]),
+                Ok(compiled) => HashMap::from([(lang.clone(), compiled)]),
                 Err(error) => {
                     eprintln!("error: {error}");
                     process::exit(1);
@@ -232,8 +232,8 @@ fn build_compiled_queries(config: &SearchConfig) -> HashMap<Language, Arc<tree_s
         LangMode::Auto => {
             let mut map = HashMap::new();
             for (lang, ts_lang) in get_all_languages() {
-                if let Ok(query) = compile_query(&ts_lang, &config.query_str) {
-                    map.insert(lang, query);
+                if let Ok(compiled) = compile_query(&ts_lang, &config.query_str) {
+                    map.insert(lang, compiled);
                 }
             }
             if map.is_empty() {
@@ -283,7 +283,7 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
 #[allow(clippy::too_many_lines)]
 fn run_search(
     config: &SearchConfig,
-    compiled_queries: &Arc<HashMap<Language, Arc<tree_sitter::Query>>>,
+    compiled_queries: &Arc<HashMap<Language, Arc<query::CompiledQuery>>>,
     color: &ColorMode,
     quiet: bool,
 ) -> SearchOutcome {

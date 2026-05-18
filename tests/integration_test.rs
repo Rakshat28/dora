@@ -45,7 +45,12 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
 }
 
-fn run_pipeline_for_language(fixture_dir: &Path, query_str: &str, lang_enum: Language, lang_str: &str) -> Vec<MatchResult> {
+fn run_pipeline_for_language(
+    fixture_dir: &Path,
+    query_str: &str,
+    lang_enum: Language,
+    lang_str: &str,
+) -> Vec<MatchResult> {
     let ts_lang = get_language(lang_str).unwrap();
     let query = compile_query(&ts_lang, query_str).unwrap();
     let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
@@ -387,10 +392,11 @@ fn test_python_function_name_capture() {
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
+    let compiled =
+        compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
-    let results = extract_matches(&tree, &source, &query, &fixture);
+    let results = extract_matches(&tree, &source, compiled.as_ref(), &fixture);
     drop(tree);
     drop(source);
 
@@ -410,10 +416,11 @@ fn test_python_function_line_numbers() {
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
+    let compiled =
+        compile_query(&lang, "(function_definition name: (identifier) @fn_name)").unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
-    let mut results = extract_matches(&tree, &source, &query, &fixture);
+    let mut results = extract_matches(&tree, &source, compiled.as_ref(), &fixture);
     drop(tree);
     drop(source);
 
@@ -493,14 +500,14 @@ fn test_python_eq_predicate() {
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(
+    let compiled = compile_query(
         &lang,
         r#"(function_definition name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
     )
     .unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
-    let results = extract_matches(&tree, &source, &query, &fixture);
+    let results = extract_matches(&tree, &source, compiled.as_ref(), &fixture);
     drop(tree);
     drop(source);
 
@@ -1482,7 +1489,7 @@ fn test_c_and_cpp_results_do_not_mix() {
 
 fn auto_compiled_queries(
     query_str: &str,
-) -> std::collections::HashMap<Language, Arc<tree_sitter::Query>> {
+) -> std::collections::HashMap<Language, Arc<ast_search::query::CompiledQuery>> {
     ast_search::parser::get_all_languages()
         .into_iter()
         .filter_map(|(lang, ts_lang)| {
@@ -1629,11 +1636,8 @@ fn test_python_nested_closure_capture() {
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(
-        &lang,
-        r#"(function_definition name: (identifier) @fn_name)"#,
-    )
-    .unwrap();
+    let query =
+        compile_query(&lang, r#"(function_definition name: (identifier) @fn_name)"#).unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let results = extract_matches(&tree, &source, &query, &fixture);
@@ -1683,8 +1687,7 @@ fn test_javascript_arrow_function_params_capture() {
 
     results.sort_by_key(|r| (r.start_line, r.start_col));
 
-    let param_names: Vec<&str> =
-        results.iter().map(|r| r.matched_text.as_str()).collect();
+    let param_names: Vec<&str> = results.iter().map(|r| r.matched_text.as_str()).collect();
 
     assert!(param_names.contains(&"a"));
     assert!(param_names.contains(&"x"));
@@ -1714,8 +1717,7 @@ fn test_typescript_interface_regex_predicate() {
     drop(tree);
     drop(source);
 
-    let iface_names: Vec<&str> =
-        results.iter().map(|r| r.matched_text.as_str()).collect();
+    let iface_names: Vec<&str> = results.iter().map(|r| r.matched_text.as_str()).collect();
 
     assert_eq!(iface_names.len(), 3);
     assert!(iface_names.contains(&"IConfig"));
@@ -1776,7 +1778,8 @@ fn test_cpp_virtual_keyword_capture() {
         assert_eq!(result.matched_text, "virtual");
     }
 
-    let mut virtual_counts_by_line: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+    let mut virtual_counts_by_line: std::collections::HashMap<usize, u32> =
+        std::collections::HashMap::new();
     for r in &results {
         *virtual_counts_by_line.entry(r.start_line).or_insert(0u32) += 1u32;
     }
@@ -1862,9 +1865,8 @@ fn test_auto_mode_mixed_language_dispatcher() {
 
     let results = auto_results(query_str);
 
-    let language_files: std::collections::HashMap<&str, Vec<&MatchResult>> = results
-        .iter()
-        .fold(std::collections::HashMap::new(), |mut map, result| {
+    let language_files: std::collections::HashMap<&str, Vec<&MatchResult>> =
+        results.iter().fold(std::collections::HashMap::new(), |mut map, result| {
             if let Some(ext) = result.file_path.extension().and_then(|e| e.to_str()) {
                 map.entry(ext).or_insert_with(Vec::new).push(result);
             }
@@ -1889,15 +1891,15 @@ fn test_auto_mode_mixed_language_dispatcher() {
 #[test]
 fn test_auto_mode_no_memory_leak_with_mixed_languages() {
     let query_str = "(function_item name: (identifier) @fn_name)";
-    
+
     let compiled1 = auto_compiled_queries(query_str);
     let compiled2 = auto_compiled_queries(query_str);
-    
+
     assert_eq!(compiled1.len(), compiled2.len());
-    
+
     let results1 = auto_results(query_str);
     let results2 = auto_results(query_str);
-    
+
     assert_eq!(results1, results2);
     assert_eq!(results1.len(), results2.len());
 }
@@ -1909,11 +1911,8 @@ fn test_nested_python_closure_line_accuracy() {
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
-    let query = compile_query(
-        &lang,
-        r#"(function_definition name: (identifier) @fn_name)"#,
-    )
-    .unwrap();
+    let query =
+        compile_query(&lang, r#"(function_definition name: (identifier) @fn_name)"#).unwrap();
 
     let (tree, source) = parse_file(&fixture, &lang).unwrap();
     let mut results = extract_matches(&tree, &source, &query, &fixture);
@@ -1940,7 +1939,7 @@ fn test_typescript_interface_count_with_regex() {
 
     let fixture = fixtures_dir().join("interfaces.ts");
     let lang = get_language("ts").unwrap();
-    
+
     let query_i_prefix = compile_query(
         &lang,
         r#"(interface_declaration name: (type_identifier) @iface_name (#match? @iface_name "^I"))"#,
@@ -1972,7 +1971,7 @@ fn test_go_struct_selective_extraction() {
 
     let fixture = fixtures_dir().join("structs.go");
     let lang = get_language("go").unwrap();
-    
+
     let query = compile_query(
         &lang,
         r#"(type_declaration (type_spec name: (type_identifier) @struct_name))"#,

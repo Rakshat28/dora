@@ -1,30 +1,65 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use tree_sitter::{Node, Query, QueryCursor, Tree};
 
 use crate::types::{AppError, MatchResult, Result};
 
+#[derive(Debug)]
+pub struct CompiledQuery {
+    pub query: Arc<Query>,
+    pub kind_ids: HashSet<u16>,
+    #[allow(dead_code)]
+    pub language: tree_sitter::Language,
+}
+
+fn build_kind_ids(language: &tree_sitter::Language, query_source: &str) -> HashSet<u16> {
+    let count = language.node_kind_count();
+    let max_id = u16::try_from(count).unwrap_or(u16::MAX);
+    (0..max_id)
+        .filter_map(|id| {
+            language
+                .node_kind_for_id(id)
+                .filter(|kind| !kind.is_empty() && query_source.contains(*kind))
+                .map(|_| id)
+        })
+        .collect()
+}
+
 #[allow(clippy::missing_errors_doc)]
-pub fn compile_query(language: &tree_sitter::Language, query_source: &str) -> Result<Arc<Query>> {
-    Query::new(language, query_source)
-        .map(Arc::new)
-        .map_err(|error| AppError::QueryCompileError(error.to_string()))
+pub fn compile_query(
+    language: &tree_sitter::Language,
+    query_source: &str,
+) -> Result<Arc<CompiledQuery>> {
+    let query = Query::new(language, query_source)
+        .map_err(|error| AppError::QueryCompileError(error.to_string()))?;
+
+    let kind_ids = build_kind_ids(language, query_source);
+
+    Ok(Arc::new(CompiledQuery { query: Arc::new(query), kind_ids, language: language.clone() }))
 }
 
 #[must_use]
 pub fn extract_matches(
     tree: &Tree,
     source: &str,
-    query: &Query,
+    compiled: &CompiledQuery,
     file_path: &Path,
 ) -> Vec<MatchResult> {
     let mut cursor = QueryCursor::new();
     let root_node = tree.root_node();
 
+    let query = compiled.query.as_ref();
     let capture_names = query.capture_names();
     let mut results = Vec::new();
 
     for query_match in cursor.matches(query, root_node, source.as_bytes()) {
+        let any_capture_matches =
+            query_match.captures.iter().any(|c| compiled.kind_ids.contains(&c.node.kind_id()));
+
+        if !any_capture_matches {
+            continue;
+        }
+
         for capture in query_match.captures {
             let node = capture.node;
 
@@ -98,11 +133,11 @@ mod tests {
 
         let source = "   fn target() {}";
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
             .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         // '   ' is three bytes, then 'fn ' is 3 bytes, so identifier starts at column 6
         // name length is 6 for 'target', so end_col == 12
         drop(tree);
@@ -133,14 +168,14 @@ mod tests {
 
         let source = "fn first() {}\n  fn target_fn() {}\nfn third() {}";
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(
+        let compiled = compile_query(
             &lang,
             r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "target_fn"))"#,
         )
         .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         // drop parse artifacts per memory contract
         drop(tree);
         drop(src);
@@ -172,14 +207,14 @@ mod tests {
 
         let source = "fn other() {}\nfn handle_one() {}\nfn noop() {}\n    fn handle_two() {}";
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(
+        let compiled = compile_query(
             &lang,
             r#"(function_item name: (identifier) @fn_name (#match? @fn_name "^handle_"))"#,
         )
         .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let mut results = extract_matches(&tree, &src, &query, &dummy_path());
+        let mut results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -215,16 +250,13 @@ mod tests {
 
         let source = "struct S { a: i32 }\nfn foo() {}\nlet x = 3;";
         let lang = get_language("rust").expect("language lookup should succeed");
-        // This query looks for impl_item which does not exist in the source
-        let query = compile_query(&lang, "(impl_item) @impl").expect("query compiles");
+        let compiled = compile_query(&lang, "(impl_item) @impl").expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results1 = extract_matches(&tree, &src, &query, &dummy_path());
+        let results1 = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
-        // extract_matches must be idempotent — calling it twice on the same tree produces identical results.
-        // The query targets impl_item; source contains no impl blocks, so we expect an empty Vec<MatchResult>.
         assert_eq!(results1.len(), 0, "Expected zero matches for impl_item on this source");
         assert_eq!(
             results1,
@@ -232,9 +264,8 @@ mod tests {
             "Must return exactly an empty Vec<MatchResult>, not just any empty collection"
         );
 
-        // Call again on a freshly parsed tree to ensure no state is retained
         let (tree2, src2) = parse_inline(source);
-        let results2 = extract_matches(&tree2, &src2, &query, &dummy_path());
+        let results2 = extract_matches(&tree2, &src2, compiled.as_ref(), &dummy_path());
         drop(tree2);
         drop(src2);
 
@@ -246,14 +277,8 @@ mod tests {
         use crate::parser::get_language;
         use std::sync::Mutex;
 
-        // SAFETY ARGUMENT: Why Arc<Query> is safe to share across Rayon threads
-        // 1. Arc<Query> is immutable after compilation; QueryCursor holds mutable state.
-        // 2. Each task creates its own QueryCursor via extract_matches, so no shared mutable state.
-        // 3. Rayon's scope allows borrowing non-'static references safely for the scope lifetime.
-        // 4. If Query were not Sync, the code would not compile.
-
         let lang = get_language("rust").expect("language lookup should succeed");
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)")
             .expect("query compiles");
 
         let n = 8usize;
@@ -271,7 +296,7 @@ mod tests {
 
         rayon::scope(|s| {
             for src in sources.clone() {
-                let q_cl = Arc::clone(&query);
+                let q_cl = Arc::clone(&compiled);
                 let counts_cl = Arc::clone(&counts);
                 s.spawn(move |_| {
                     use std::io::Write;
@@ -279,11 +304,9 @@ mod tests {
 
                     let src_owned = src;
 
-                    // Create a temp file and write the source. unwrap is safe here in tests.
                     let mut f = NamedTempFile::new().expect("tempfile creation");
                     write!(f, "{}", src_owned).expect("writing tempfile");
 
-                    // parse_file may fail only if the tempfile cannot be read; expect is appropriate in tests
                     let (tree, ssrc) = crate::parser::parse_file(
                         f.path(),
                         &crate::parser::get_language("rust").unwrap(),
@@ -309,8 +332,11 @@ mod tests {
             "Counts must be 1..=n after sorting"
         );
 
-        // After the scope closes and all cloned Arcs inside tasks are dropped, strong_count must be back to 1
-        assert_eq!(Arc::strong_count(&query), 1, "Arc strong_count must be 1 after scope closes");
+        assert_eq!(
+            Arc::strong_count(&compiled),
+            1,
+            "Arc strong_count must be 1 after scope closes"
+        );
     }
 
     #[test]
@@ -372,9 +398,9 @@ mod tests {
             result.err()
         );
 
-        let query = result.unwrap();
+        let compiled = result.unwrap();
         assert!(
-            query.capture_names().contains(&"fn_name"),
+            compiled.query.capture_names().contains(&"fn_name"),
             "Compiled query must expose the @fn_name capture name"
         );
     }
@@ -419,15 +445,15 @@ mod tests {
         use crate::parser::get_language;
 
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(identifier) @id").unwrap();
+        let compiled = compile_query(&lang, "(identifier) @id").unwrap();
 
-        let query2 = Arc::clone(&query);
+        let compiled2 = Arc::clone(&compiled);
         assert_eq!(
-            query.capture_names(),
-            query2.capture_names(),
+            compiled.query.capture_names(),
+            compiled2.query.capture_names(),
             "Arc clones must share the same compiled query"
         );
-        assert_eq!(Arc::strong_count(&query), 2);
+        assert_eq!(Arc::strong_count(&compiled), 2);
     }
 
     #[test]
@@ -441,10 +467,10 @@ fn authenticate(user: &str, password: &str) -> bool {
 fn logout() {}
 "#;
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -469,11 +495,11 @@ fn logout() {}
 
         let source = "fn main() { let x = 1; }";
         let lang = get_language("rust").unwrap();
-        let query =
+        let compiled =
             compile_query(&lang, "(struct_item name: (type_identifier) @struct_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -490,10 +516,10 @@ fn logout() {}
 
         let source = "\nfn first() {}\nfn second() {}";
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -517,7 +543,7 @@ fn reconnect() {}
 "#;
         let lang = get_language("rust").unwrap();
 
-        let query = compile_query(
+        let compiled = compile_query(
             &lang,
             r#"
             (function_item
@@ -528,7 +554,7 @@ fn reconnect() {}
         .unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -547,11 +573,11 @@ fn reconnect() {}
 
         let source = "fn foo() {}";
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let specific_path = PathBuf::from("src/auth/handler.rs");
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &specific_path);
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &specific_path);
         drop(tree);
         drop(src);
 
@@ -569,7 +595,7 @@ fn reconnect() {}
         let source = "fn process(input: String) {}";
         let lang = get_language("rust").unwrap();
 
-        let query = compile_query(
+        let compiled = compile_query(
             &lang,
             r#"
             (function_item
@@ -581,7 +607,7 @@ fn reconnect() {}
         .unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, &query, &dummy_path());
+        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -611,11 +637,12 @@ fn reconnect() {}
 
         let source = "fn main() {}";
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
         let mut cursor = QueryCursor::new();
-        let matches: Vec<_> = cursor.matches(&query, tree.root_node(), src.as_bytes()).collect();
+        let matches: Vec<_> =
+            cursor.matches(compiled.query.as_ref(), tree.root_node(), src.as_bytes()).collect();
 
         let node = matches[0].captures[0].node;
         assert!(node.is_named(), "identifier should be a named node");
@@ -634,11 +661,12 @@ fn reconnect() {}
         let source = "fn main() {}";
         let lang = get_language("rust").unwrap();
 
-        let query = compile_query(&lang, r#"("fn" @keyword)"#).unwrap();
+        let compiled = compile_query(&lang, r#"("fn" @keyword)"#).unwrap();
 
         let (tree, src) = parse_inline(source);
         let mut cursor = QueryCursor::new();
-        let matches: Vec<_> = cursor.matches(&query, tree.root_node(), src.as_bytes()).collect();
+        let matches: Vec<_> =
+            cursor.matches(compiled.query.as_ref(), tree.root_node(), src.as_bytes()).collect();
 
         if matches.is_empty() {
             drop(tree);
@@ -673,9 +701,9 @@ fn reconnect() {}
         use std::thread;
 
         let lang = get_language("rust").unwrap();
-        let query = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
-        let query2 = Arc::clone(&query);
+        let compiled2 = Arc::clone(&compiled);
 
         let source1 = "fn alpha() {}";
         let source2 = "fn beta() {}";
@@ -689,14 +717,14 @@ fn reconnect() {}
                 crate::parser::parse_file(f.path(), &crate::parser::get_language("rust").unwrap())
                     .unwrap()
             };
-            let results = extract_matches(&tree, &src, &query2, &PathBuf::from("b.rs"));
+            let results = extract_matches(&tree, &src, compiled2.as_ref(), &PathBuf::from("b.rs"));
             drop(tree);
             drop(src);
             results
         });
 
         let (tree1, src1) = parse_inline(source1);
-        let results1 = extract_matches(&tree1, &src1, &query, &PathBuf::from("a.rs"));
+        let results1 = extract_matches(&tree1, &src1, compiled.as_ref(), &PathBuf::from("a.rs"));
         drop(tree1);
         drop(src1);
 
@@ -706,5 +734,105 @@ fn reconnect() {}
         assert_eq!(results1[0].matched_text, "alpha");
         assert_eq!(results2.len(), 1);
         assert_eq!(results2[0].matched_text, "beta");
+    }
+
+    #[test]
+    fn test_compiled_query_has_non_empty_kind_ids() {
+        use crate::parser::get_language;
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        assert!(!compiled.kind_ids.is_empty());
+    }
+
+    #[test]
+    fn test_kind_ids_contains_function_item() {
+        use crate::parser::get_language;
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let fn_item_id = lang.id_for_node_kind("function_item", true);
+        assert!(compiled.kind_ids.contains(&fn_item_id));
+    }
+
+    #[test]
+    fn test_kind_ids_contains_identifier() {
+        use crate::parser::get_language;
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let id_id = lang.id_for_node_kind("identifier", true);
+        assert!(compiled.kind_ids.contains(&id_id));
+    }
+
+    #[test]
+    fn test_extract_matches_correct_with_kind_filter() {
+        use crate::parser::{get_language, parse_file};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let source = "fn alpha() {}\nfn beta() {}";
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let (tree, src) = parse_file(file.path(), &lang).unwrap();
+        let results = extract_matches(&tree, &src, &compiled, file.path());
+        drop(tree);
+        drop(src);
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|r| r.matched_text.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+    }
+
+    #[test]
+    fn test_kind_filter_preserves_eq_predicate_results() {
+        use crate::parser::{get_language, parse_file};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let source = "fn connect() {}\nfn disconnect() {}";
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(
+            &lang,
+            r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "connect"))"#,
+        )
+        .unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let (tree, src) = parse_file(file.path(), &lang).unwrap();
+        let results = extract_matches(&tree, &src, &compiled, file.path());
+        drop(tree);
+        drop(src);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_text, "connect");
+    }
+
+    #[test]
+    fn test_build_kind_ids_is_superset() {
+        use crate::parser::{get_language, parse_file};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let source = "fn foo() { let x = 1; }";
+        let lang = get_language("rust").unwrap();
+        let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let (tree, src) = parse_file(file.path(), &lang).unwrap();
+        let results = extract_matches(&tree, &src, &compiled, file.path());
+        drop(tree);
+        drop(src);
+        for result in &results {
+            let node_kind_name = result.matched_text.as_str();
+            assert_eq!(node_kind_name, "foo");
+        }
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_compiled_query_language_field() {
+        use crate::parser::get_language;
+        let rust_lang = get_language("rust").unwrap();
+        let compiled = compile_query(&rust_lang, "(identifier) @id").unwrap();
+        assert_eq!(compiled.language.node_kind_count(), rust_lang.node_kind_count());
     }
 } // mod tests
