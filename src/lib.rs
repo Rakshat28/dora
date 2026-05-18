@@ -8,3 +8,5 @@ pub mod query;
 pub mod trigram;
 pub mod types;
 pub mod walker;
+pub mod bloom;
+pub mod indexer;
