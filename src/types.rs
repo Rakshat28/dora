@@ -34,7 +34,7 @@ pub struct MatchResult {
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchConfig {
-    pub query_str: String,
+    pub queries: Vec<String>,
     pub root_path: PathBuf,
     pub lang_mode: LangMode,
 }
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn search_config_derives() {
         let config = SearchConfig {
-            query_str: "(function_item name: (identifier) @fn.name)".to_string(),
+            queries: vec!["(function_item name: (identifier) @fn.name)".to_string()],
             root_path: PathBuf::from("/home/user/project"),
             lang_mode: LangMode::Single(Language::Rust),
         };
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn search_config_inequality() {
         let base = SearchConfig {
-            query_str: "fn main".to_string(),
+            queries: vec!["fn main".to_string()],
             root_path: PathBuf::from("."),
             lang_mode: LangMode::Single(Language::Rust),
         };

@@ -5,7 +5,7 @@ use tree_sitter::{Node, Query, QueryCursor, Tree};
 
 use crate::types::{AppError, MatchResult, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegexPredicate {
     pub pattern_index: usize,
     pub capture_index: u32,
@@ -19,6 +19,13 @@ pub struct CompiledQuery {
     #[allow(dead_code)]
     pub language: tree_sitter::Language,
     pub regex_predicates: Vec<RegexPredicate>,
+}
+
+#[derive(Debug)]
+pub struct MultiCompiledQuery {
+    pub queries: Vec<Arc<CompiledQuery>>,
+    #[allow(dead_code)]
+    pub language: tree_sitter::Language,
 }
 
 fn build_kind_ids(language: &tree_sitter::Language, query_source: &str) -> HashSet<u16> {
@@ -169,82 +176,127 @@ pub fn compile_query(
     }))
 }
 
-#[must_use]
-pub fn extract_matches(
-    tree: &Tree,
-    source: &str,
-    compiled: &CompiledQuery,
-    file_path: &Path,
-) -> Vec<MatchResult> {
-    let mut cursor = QueryCursor::new();
-    let root_node = tree.root_node();
+#[allow(clippy::missing_errors_doc)]
+pub fn compile_multi_query(
+    language: &tree_sitter::Language,
+    query_sources: &[String],
+) -> Result<Arc<MultiCompiledQuery>> {
+    let mut queries = Vec::new();
 
-    let query = compiled.query.as_ref();
-    let capture_names = query.capture_names();
-    let mut results = Vec::new();
-
-    for query_match in cursor.matches(query, root_node, source.as_bytes()) {
-        let any_capture_matches =
-            query_match.captures.iter().any(|c| compiled.kind_ids.contains(&c.node.kind_id()));
-
-        if !any_capture_matches {
-            continue;
-        }
-
-        let passes_regex = compiled
-            .regex_predicates
-            .iter()
-            .filter(|predicate| predicate.pattern_index == query_match.pattern_index as usize)
-            .all(|predicate| {
-                query_match
-                    .captures
-                    .iter()
-                    .find(|capture| capture.index == predicate.capture_index)
-                    .and_then(|capture| source.get(capture.node.byte_range()))
-                    .map(|text| predicate.regex.is_match(text))
-                    .unwrap_or(false)
-            });
-
-        if !passes_regex {
-            continue;
-        }
-
-        for capture in query_match.captures {
-            let node = capture.node;
-
-            let base_capture_name = capture_names[capture.index as usize];
-            let capture_name = format_capture_name(base_capture_name, &node);
-
-            let byte_range = node.byte_range();
-
-            let matched_text = if let Some(slice) = source.get(byte_range.clone()) {
-                slice.to_owned()
-            } else {
-                eprintln!(
-                    "warning: capture byte range {:?} out of bounds for source of length {} — skipping capture '{}'",
-                    byte_range,
-                    source.len(),
-                    capture_name
-                );
-                continue;
-            };
-
-            let start_position = node.start_position();
-            let end_position = node.end_position();
-
-            results.push(MatchResult {
-                file_path: file_path.to_path_buf(),
-                capture_name,
-                matched_text,
-                start_line: start_position.row + 1,
-                start_col: start_position.column,
-                end_line: end_position.row + 1,
-                end_col: end_position.column,
-            });
+    for query_source in query_sources {
+        if let Ok(compiled) = compile_query(language, query_source) {
+            queries.push(compiled);
         }
     }
 
+    Ok(Arc::new(MultiCompiledQuery { queries, language: language.clone() }))
+}
+
+#[must_use]
+pub fn extract_multi_matches(
+    tree: &tree_sitter::Tree,
+    source_bytes: &[u8],
+    multi: &MultiCompiledQuery,
+    file_path: &Path,
+) -> Vec<MatchResult> {
+    let mut results = Vec::new();
+
+    for compiled in &multi.queries {
+        let mut cursor = QueryCursor::new();
+        let root_node = tree.root_node();
+        let capture_names = compiled.query.capture_names();
+
+        for query_match in cursor.matches(&compiled.query, root_node, source_bytes) {
+            let any_capture_matches =
+                query_match.captures.iter().any(|c| compiled.kind_ids.contains(&c.node.kind_id()));
+
+            if !any_capture_matches {
+                continue;
+            }
+
+            let passes_regex = compiled
+                .regex_predicates
+                .iter()
+                .filter(|rp| rp.pattern_index == query_match.pattern_index as usize)
+                .all(|rp| {
+                    query_match
+                        .captures
+                        .iter()
+                        .find(|c| c.index == rp.capture_index)
+                        .map(|c| {
+                            let text = match std::str::from_utf8(&source_bytes[c.node.byte_range()])
+                            {
+                                Ok(s) => s,
+                                Err(_) => return false,
+                            };
+                            rp.regex.is_match(text)
+                        })
+                        .unwrap_or(false)
+                });
+
+            if !passes_regex {
+                continue;
+            }
+
+            for capture in query_match.captures {
+                let base_name = capture_names[capture.index as usize];
+                let capture_name = format_capture_name(base_name, &capture.node);
+                let byte_range = capture.node.byte_range();
+
+                let matched_text = match std::str::from_utf8(
+                    source_bytes.get(byte_range.clone()).unwrap_or(&[]),
+                ) {
+                    Ok(s) if !s.is_empty() => s.to_owned(),
+                    _ => {
+                        eprintln!(
+                            "warning: invalid utf-8 or out-of-bounds capture at {:?} in {}",
+                            byte_range,
+                            file_path.display()
+                        );
+                        continue;
+                    }
+                };
+
+                let start = capture.node.start_position();
+                let end = capture.node.end_position();
+
+                results.push(MatchResult {
+                    file_path: file_path.to_path_buf(),
+                    capture_name,
+                    matched_text,
+                    start_line: start.row + 1,
+                    start_col: start.column,
+                    end_line: end.row + 1,
+                    end_col: end.column,
+                });
+            }
+        }
+    }
+
+    results.sort();
+    results.dedup();
     results
+}
+
+#[must_use]
+#[allow(dead_code)]
+pub fn extract_matches(
+    tree: &Tree,
+    source: impl AsRef<[u8]>,
+    compiled: &CompiledQuery,
+    file_path: &Path,
+) -> Vec<MatchResult> {
+    let source_bytes = source.as_ref();
+    let multi = MultiCompiledQuery {
+        queries: vec![Arc::new(CompiledQuery {
+            query: Arc::clone(&compiled.query),
+            kind_ids: compiled.kind_ids.clone(),
+            language: compiled.language.clone(),
+            regex_predicates: compiled.regex_predicates.clone(),
+        })],
+        language: compiled.language.clone(),
+    };
+    extract_multi_matches(tree, source_bytes, &multi, file_path)
 }
 
 fn format_capture_name(base_name: &str, node: &Node<'_>) -> String {
@@ -261,7 +313,7 @@ mod tests {
     use rayon::prelude::*;
     use std::path::PathBuf;
 
-    fn parse_inline(source: &str) -> (tree_sitter::Tree, String) {
+    fn parse_inline(source: &str) -> (tree_sitter::Tree, crate::parser::FileSource) {
         use crate::parser::parse_file;
         use std::io::Write;
         use tempfile::NamedTempFile;
@@ -270,6 +322,15 @@ mod tests {
         write!(file, "{}", source).unwrap();
         parse_file(file.path(), &crate::parser::get_language("rust").unwrap())
             .expect("inline parse failed")
+    }
+
+    fn extract_test_matches(
+        tree: &tree_sitter::Tree,
+        src: &crate::parser::FileSource,
+        compiled: &CompiledQuery,
+        file_path: &std::path::Path,
+    ) -> Vec<MatchResult> {
+        extract_matches(tree, src.as_str().unwrap(), compiled, file_path)
     }
 
     fn dummy_path() -> PathBuf {
@@ -286,7 +347,7 @@ mod tests {
             .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         // '   ' is three bytes, then 'fn ' is 3 bytes, so identifier starts at column 6
         // name length is 6 for 'target', so end_col == 12
         drop(tree);
@@ -324,7 +385,7 @@ mod tests {
         .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         // drop parse artifacts per memory contract
         drop(tree);
         drop(src);
@@ -363,7 +424,7 @@ mod tests {
         .expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let mut results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let mut results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -402,7 +463,7 @@ mod tests {
         let compiled = compile_query(&lang, "(impl_item) @impl").expect("query compiles");
 
         let (tree, src) = parse_inline(source);
-        let results1 = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results1 = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -414,7 +475,7 @@ mod tests {
         );
 
         let (tree2, src2) = parse_inline(source);
-        let results2 = extract_matches(&tree2, &src2, compiled.as_ref(), &dummy_path());
+        let results2 = extract_test_matches(&tree2, &src2, compiled.as_ref(), &dummy_path());
         drop(tree2);
         drop(src2);
 
@@ -461,7 +522,7 @@ mod tests {
                         &crate::parser::get_language("rust").unwrap(),
                     )
                     .expect("parse_file");
-                    let results = extract_matches(&tree, &ssrc, &*q_cl, f.path());
+                    let results = extract_test_matches(&tree, &ssrc, &*q_cl, f.path());
                     let cnt = results.len();
                     drop(tree);
                     drop(ssrc);
@@ -514,7 +575,7 @@ mod tests {
                 let (tree, src) =
                     crate::parser::parse_file(p, &crate::parser::get_language("rust").unwrap())
                         .expect("parse_file");
-                let res = extract_matches(&tree, &src, &*query, p);
+                let res = extract_test_matches(&tree, &src, &*query, p);
                 drop(tree);
                 drop(src);
                 res
@@ -619,7 +680,7 @@ fn logout() {}
         let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -648,7 +709,7 @@ fn logout() {}
             compile_query(&lang, "(struct_item name: (type_identifier) @struct_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -668,7 +729,7 @@ fn logout() {}
         let compiled = compile_query(&lang, "(function_item name: (identifier) @fn_name)").unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -703,7 +764,7 @@ fn reconnect() {}
         .unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -726,7 +787,7 @@ fn reconnect() {}
 
         let specific_path = PathBuf::from("src/auth/handler.rs");
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &specific_path);
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &specific_path);
         drop(tree);
         drop(src);
 
@@ -756,7 +817,7 @@ fn reconnect() {}
         .unwrap();
 
         let (tree, src) = parse_inline(source);
-        let results = extract_matches(&tree, &src, compiled.as_ref(), &dummy_path());
+        let results = extract_test_matches(&tree, &src, compiled.as_ref(), &dummy_path());
         drop(tree);
         drop(src);
 
@@ -866,14 +927,16 @@ fn reconnect() {}
                 crate::parser::parse_file(f.path(), &crate::parser::get_language("rust").unwrap())
                     .unwrap()
             };
-            let results = extract_matches(&tree, &src, compiled2.as_ref(), &PathBuf::from("b.rs"));
+            let results =
+                extract_test_matches(&tree, &src, compiled2.as_ref(), &PathBuf::from("b.rs"));
             drop(tree);
             drop(src);
             results
         });
 
         let (tree1, src1) = parse_inline(source1);
-        let results1 = extract_matches(&tree1, &src1, compiled.as_ref(), &PathBuf::from("a.rs"));
+        let results1 =
+            extract_test_matches(&tree1, &src1, compiled.as_ref(), &PathBuf::from("a.rs"));
         drop(tree1);
         drop(src1);
 
@@ -923,7 +986,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
         assert_eq!(results.len(), 2);
@@ -948,7 +1011,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
         assert_eq!(results.len(), 1);
@@ -967,7 +1030,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
         for result in &results {
@@ -1043,7 +1106,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
 
@@ -1070,7 +1133,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
 
@@ -1113,7 +1176,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let _ = extract_matches(&tree, &src, &compiled, file.path());
+        let _ = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
 
@@ -1135,7 +1198,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
 
@@ -1160,7 +1223,7 @@ fn reconnect() {}
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", source).unwrap();
         let (tree, src) = parse_file(file.path(), &lang).unwrap();
-        let results = extract_matches(&tree, &src, &compiled, file.path());
+        let results = extract_test_matches(&tree, &src, &compiled, file.path());
         drop(tree);
         drop(src);
 
@@ -1169,4 +1232,78 @@ fn reconnect() {}
         assert!(names.contains(&"test_login"));
         assert!(names.contains(&"test_logout"));
     }
-} // mod tests
+
+    #[test]
+    fn test_compile_multi_query_all_valid() {
+        use crate::parser::get_language;
+        let lang = get_language("rust").unwrap();
+        let queries = vec![
+            "(function_item name: (identifier) @fn_name)".to_string(),
+            "(struct_item name: (type_identifier) @struct_name)".to_string(),
+        ];
+        let multi = compile_multi_query(&lang, &queries).unwrap();
+        assert_eq!(multi.queries.len(), 2);
+    }
+
+    #[test]
+    fn test_compile_multi_query_skips_incompatible() {
+        use crate::parser::get_language;
+        let lang = get_language("rust").unwrap();
+        let queries = vec![
+            "(function_item name: (identifier) @fn_name)".to_string(),
+            "(function_definition name: (identifier) @fn_name)".to_string(),
+        ];
+        let multi = compile_multi_query(&lang, &queries).unwrap();
+        assert_eq!(multi.queries.len(), 1, "function_definition does not exist in Rust grammar");
+    }
+
+    #[test]
+    fn test_extract_multi_matches_all_queries() {
+        use crate::parser::{get_language, parse_file};
+        use std::collections::HashSet;
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let source = "fn foo() {}\nstruct Bar { x: i32 }";
+        let lang = get_language("rust").unwrap();
+        let queries = vec![
+            "(function_item name: (identifier) @fn_name)".to_string(),
+            "(struct_item name: (type_identifier) @struct_name)".to_string(),
+        ];
+        let multi = compile_multi_query(&lang, &queries).unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let (tree, src) = parse_file(file.path(), &lang).unwrap();
+        let results = extract_multi_matches(&tree, src.as_bytes(), &multi, file.path());
+        drop(tree);
+        drop(src);
+
+        assert_eq!(results.len(), 2);
+        let texts: HashSet<&str> = results.iter().map(|r| r.matched_text.as_str()).collect();
+        assert!(texts.contains("foo"));
+        assert!(texts.contains("Bar"));
+    }
+
+    #[test]
+    fn test_extract_multi_matches_deduplicates() {
+        use crate::parser::{get_language, parse_file};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let source = "fn foo() {}";
+        let lang = get_language("rust").unwrap();
+        let queries = vec![
+            "(function_item name: (identifier) @fn_name)".to_string(),
+            "(function_item name: (identifier) @fn_name)".to_string(),
+        ];
+        let multi = compile_multi_query(&lang, &queries).unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", source).unwrap();
+        let (tree, src) = parse_file(file.path(), &lang).unwrap();
+        let results = extract_multi_matches(&tree, src.as_bytes(), &multi, file.path());
+        drop(tree);
+        drop(src);
+
+        assert_eq!(results.len(), 1, "identical queries must not produce duplicate MatchResults");
+    }
+}

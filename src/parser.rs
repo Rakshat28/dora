@@ -13,6 +13,38 @@ thread_local! {
     static PARSER: RefCell<Parser> = RefCell::new(create_parser());
 }
 
+#[derive(Debug)]
+pub enum FileSource {
+    Heap(String),
+    Mapped(memmap2::Mmap),
+}
+
+impl FileSource {
+    #[allow(dead_code)]
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            FileSource::Heap(s) => s.as_bytes(),
+            FileSource::Mapped(m) => m.as_ref(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            FileSource::Heap(s) => Some(s.as_str()),
+            FileSource::Mapped(m) => std::str::from_utf8(m.as_ref()).ok(),
+        }
+    }
+}
+
+impl AsRef<[u8]> for FileSource {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+const MMAP_THRESHOLD_BYTES: u64 = 1_024 * 1_024;
+
 #[allow(clippy::missing_errors_doc, dead_code)]
 pub fn get_language(lang: &str) -> Result<TsLanguage> {
     match lang {
@@ -29,12 +61,30 @@ pub fn get_language(lang: &str) -> Result<TsLanguage> {
     }
 }
 
-#[must_use = "The returned Tree and String must be dropped immediately after query execution. Holding them accumulates unbounded RAM."]
-#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
-pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree, String)> {
-    let source = std::fs::read_to_string(path).map_err(AppError::IoError)?;
+fn parse_file_with_threshold(
+    path: &Path,
+    language: &tree_sitter::Language,
+    threshold: u64,
+) -> Result<(Tree, FileSource)> {
+    let metadata = std::fs::metadata(path).map_err(AppError::IoError)?;
+    let file_size = metadata.len();
 
-    if source.is_empty() {
+    let source = if file_size >= threshold {
+        let file = std::fs::File::open(path).map_err(AppError::IoError)?;
+        let mmap = unsafe { memmap2::Mmap::map(&file).map_err(AppError::IoError)? };
+        if std::str::from_utf8(mmap.as_ref()).is_err() {
+            return Err(AppError::ParseError(format!(
+                "file contains invalid UTF-8: {}",
+                path.display()
+            )));
+        }
+        FileSource::Mapped(mmap)
+    } else {
+        let s = std::fs::read_to_string(path).map_err(AppError::IoError)?;
+        FileSource::Heap(s)
+    };
+
+    if source.as_bytes().is_empty() {
         return Err(AppError::ParseError(format!(
             "File is empty and contains no parseable content: {}",
             path.display()
@@ -57,6 +107,12 @@ pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree
     })?;
 
     Ok((tree, source))
+}
+
+#[must_use = "The returned Tree and FileSource must be dropped immediately after query execution. Holding them accumulates unbounded RAM."]
+#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+pub fn parse_file(path: &Path, language: &tree_sitter::Language) -> Result<(Tree, FileSource)> {
+    parse_file_with_threshold(path, language, MMAP_THRESHOLD_BYTES)
 }
 
 pub fn detect_language(path: &Path) -> Option<Language> {
@@ -178,7 +234,10 @@ mod tests {
             "Valid Rust source should produce a tree with no errors"
         );
 
-        assert!(source.contains("fn greet"), "Returned source should contain the written function");
+        assert!(
+            source.as_str().unwrap().contains("fn greet"),
+            "Returned source should contain the written function"
+        );
 
         drop(tree);
         drop(source);
@@ -253,10 +312,10 @@ mod tests {
 
         let (tree, source) = parse_file(file.path(), &get_language("rust").unwrap()).unwrap();
 
-        let owned: (Tree, String) = (tree, source);
+        let owned: (Tree, FileSource) = (tree, source);
 
         assert_eq!(owned.0.root_node().kind(), "source_file");
-        assert!(owned.1.contains("Config"));
+        assert!(owned.1.as_str().unwrap().contains("Config"));
 
         drop(owned.0);
         drop(owned.1);
@@ -303,7 +362,7 @@ mod tests {
         let (tree, source) = result.unwrap();
         assert_eq!(tree.root_node().kind(), "program");
         assert!(!tree.root_node().has_error());
-        assert!(source.contains("function greet"));
+        assert!(source.as_str().unwrap().contains("function greet"));
         drop(tree);
         drop(source);
     }
@@ -320,7 +379,7 @@ mod tests {
         let (tree, source) = result.unwrap();
         assert_eq!(tree.root_node().kind(), "program");
         assert!(!tree.root_node().has_error());
-        assert!(source.contains("interface Shape"));
+        assert!(source.as_str().unwrap().contains("interface Shape"));
         drop(tree);
         drop(source);
     }
@@ -421,7 +480,7 @@ mod tests {
         let (tree, source) = result.unwrap();
         assert_eq!(tree.root_node().kind(), "translation_unit");
         assert!(!tree.root_node().has_error());
-        assert!(source.contains("int add"));
+        assert!(source.as_str().unwrap().contains("int add"));
         drop(tree);
         drop(source);
     }
@@ -439,7 +498,7 @@ mod tests {
         let (tree, source) = result.unwrap();
         assert_eq!(tree.root_node().kind(), "translation_unit");
         assert!(!tree.root_node().has_error());
-        assert!(source.contains("class Calculator"));
+        assert!(source.as_str().unwrap().contains("class Calculator"));
         drop(tree);
         drop(source);
     }
@@ -497,7 +556,7 @@ mod tests {
         let (tree, source) = result.unwrap();
         assert_eq!(tree.root_node().kind(), "source_file");
         assert!(!tree.root_node().has_error());
-        assert!(source.contains("func greet"));
+        assert!(source.as_str().unwrap().contains("func greet"));
         drop(tree);
         drop(source);
     }
@@ -606,5 +665,52 @@ mod tests {
             let mut parser = tree_sitter::Parser::new();
             assert!(parser.set_language(&ts_lang).is_ok());
         }
+    }
+
+    #[test]
+    fn test_small_file_uses_heap_source() {
+        let lang = get_language("rust").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "fn main() {{}}").unwrap();
+        let (_tree, source) = parse_file_with_threshold(file.path(), &lang, 1_024 * 1_024).unwrap();
+        assert!(matches!(source, FileSource::Heap(_)));
+    }
+
+    #[test]
+    fn test_large_file_uses_mapped_source() {
+        let lang = get_language("rust").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        let content = "fn foo() {}\n".repeat(100);
+        write!(file, "{}", content).unwrap();
+        let threshold = content.len() as u64;
+        let (_tree, source) = parse_file_with_threshold(file.path(), &lang, threshold).unwrap();
+        assert!(matches!(source, FileSource::Mapped(_)));
+    }
+
+    #[test]
+    fn test_file_source_as_bytes_consistent() {
+        let lang = get_language("rust").unwrap();
+        let content = "fn consistent() {}";
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", content).unwrap();
+
+        let (_, heap_src) = parse_file_with_threshold(file.path(), &lang, u64::MAX).unwrap();
+        let (_, mmap_src) = parse_file_with_threshold(file.path(), &lang, 0).unwrap();
+
+        assert_eq!(heap_src.as_bytes(), mmap_src.as_bytes());
+        assert_eq!(heap_src.as_bytes(), content.as_bytes());
+    }
+
+    #[test]
+    fn test_mmap_file_parses_correctly() {
+        let lang = get_language("rust").unwrap();
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "fn mmapped() {{ let x = 42; }}").unwrap();
+        let (tree, source) = parse_file_with_threshold(file.path(), &lang, 0).unwrap();
+        assert!(matches!(source, FileSource::Mapped(_)));
+        assert_eq!(tree.root_node().kind(), "source_file");
+        assert!(!tree.root_node().has_error());
+        drop(tree);
+        drop(source);
     }
 }
