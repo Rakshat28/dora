@@ -10,3 +10,4 @@ pub mod types;
 pub mod walker;
 pub mod bloom;
 pub mod indexer;
+pub mod sieve;

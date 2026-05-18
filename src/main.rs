@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    fs,
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
@@ -13,14 +14,22 @@ use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use rayon::prelude::*;
 
+mod bloom;
+mod index;
 mod output;
 mod parser;
 mod query;
+mod sieve;
+mod trigram;
 mod types;
 pub mod walker;
 
+use bloom::BloomFilter;
+use index::{index_path_for_root, load_index, save_index, IndexEntry, IndexManifest};
 use output::{print_match, print_summary, resolve_color_mode, ColorMode};
-use parser::{detect_language, get_all_languages, parse_file};
+use parser::{detect_language, get_all_languages, parse_file_with_metadata};
+use sieve::{build_query_trigram_set, get_file_index_status, should_parse_file, FileIndexStatus, QueryTrigramSet};
+use trigram::extract_unique_trigrams_from_bytes;
 use types::{AppError, LangMode, Language, MatchResult, SearchConfig};
 use walker::{build_auto_walker, build_walker};
 
@@ -131,6 +140,13 @@ struct Cli {
     stats: bool,
 
     #[arg(
+        long = "no-update-index",
+        default_value_t = false,
+        help = "Do not refresh the on-disk index during search"
+    )]
+    no_update_index: bool,
+
+    #[arg(
         long = "generate-completions",
         value_name = "SHELL",
         hide = true,
@@ -144,6 +160,8 @@ struct SearchOutcome {
     files_walked: usize,
     files_parsed: usize,
     files_skipped: usize,
+    sieve_rejected: usize,
+    index_entries_updated: usize,
     files_with_matches: usize,
 }
 
@@ -217,6 +235,18 @@ fn lang_to_ts_language(lang: &Language) -> tree_sitter::Language {
     }
 }
 
+fn language_to_index_name(lang: &Language) -> &'static str {
+    match lang {
+        Language::Rust => "rust",
+        Language::Python => "python",
+        Language::JavaScript => "js",
+        Language::TypeScript => "ts",
+        Language::Go => "go",
+        Language::C => "c",
+        Language::Cpp => "cpp",
+    }
+}
+
 fn build_compiled_queries(
     config: &SearchConfig,
 ) -> HashMap<Language, Arc<query::MultiCompiledQuery>> {
@@ -272,7 +302,9 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
     eprintln!("{:<18}{}", "files walked:", outcome.files_walked);
     eprintln!("{:<18}{}", "files parsed:", outcome.files_parsed);
     eprintln!("{:<18}{}", "files skipped:", outcome.files_skipped);
+    eprintln!("{:<18}{}", "sieve rejected:", outcome.sieve_rejected);
     eprintln!("{:<18}{}", "matches found:", outcome.results.len());
+    eprintln!("{:<18}{}", "index updates:", outcome.index_entries_updated);
     eprintln!("{:<18}{:.2}% (files with matches / files parsed)", "match rate:", match_rate);
     eprintln!("{:<18}{}ms", "wall time:", elapsed.as_millis());
     match throughput {
@@ -286,8 +318,11 @@ fn print_stats(outcome: &SearchOutcome, elapsed: Duration) {
 fn run_search(
     config: &SearchConfig,
     compiled_queries: &Arc<HashMap<Language, Arc<query::MultiCompiledQuery>>>,
+    query_trigram_set: &Arc<QueryTrigramSet>,
+    index_manifest: &Arc<Mutex<IndexManifest>>,
     color: &ColorMode,
     quiet: bool,
+    no_update_index: bool,
 ) -> SearchOutcome {
     let _ = color;
     let _ = quiet;
@@ -296,12 +331,18 @@ fn run_search(
     let files_walked_count = Arc::new(Mutex::new(0usize));
     let files_parsed_count = Arc::new(Mutex::new(0usize));
     let files_skipped_count = Arc::new(Mutex::new(0usize));
+    let sieve_rejected_count = Arc::new(Mutex::new(0usize));
+    let index_entries_updated_count = Arc::new(Mutex::new(0usize));
 
     let results_ref = Arc::clone(&results);
     let files_walked_ref = Arc::clone(&files_walked_count);
     let files_parsed_ref = Arc::clone(&files_parsed_count);
     let files_skipped_ref = Arc::clone(&files_skipped_count);
+    let sieve_rejected_ref = Arc::clone(&sieve_rejected_count);
+    let index_entries_updated_ref = Arc::clone(&index_entries_updated_count);
     let compiled_queries_ref = Arc::clone(compiled_queries);
+    let query_trigram_set_ref = Arc::clone(query_trigram_set);
+    let index_manifest_ref = Arc::clone(index_manifest);
 
     let walker: Box<dyn Iterator<Item = crate::types::Result<ignore::DirEntry>> + Send> =
         match &config.lang_mode {
@@ -329,17 +370,45 @@ fn run_search(
             };
 
             let ts_lang = lang_to_ts_language(&detected_lang);
+            let metadata = match fs::metadata(entry.path()) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    handle_file_error(
+                        &FileError::ReadFailure {
+                            path: entry.path().to_path_buf(),
+                            message: error.to_string(),
+                        },
+                        &files_skipped_ref,
+                    );
+                    return;
+                }
+            };
 
-            match parse_file(entry.path(), &ts_lang) {
+            let file_index_status = {
+                let manifest_guard = index_manifest_ref
+                    .lock()
+                    .expect("index_manifest Mutex was poisoned by a panicked thread");
+                get_file_index_status(&manifest_guard, entry.path(), &metadata)
+            };
+
+            if let FileIndexStatus::Fresh(filter) = &file_index_status {
+                if !should_parse_file(filter, &query_trigram_set_ref) {
+                    *sieve_rejected_ref
+                        .lock()
+                        .expect("sieve_rejected Mutex was poisoned by a panicked thread") += 1;
+                    return;
+                }
+            }
+
+            match parse_file_with_metadata(entry.path(), &ts_lang, &metadata) {
                 Ok((tree, source)) => {
+                    let source_bytes = source.as_bytes();
                     let matches = query::extract_multi_matches(
                         &tree,
-                        source.as_bytes(),
+                        source_bytes,
                         ts_query.as_ref(),
                         entry.path(),
                     );
-                    drop(tree);
-                    drop(source);
 
                     let mut results_guard = results_ref
                         .lock()
@@ -350,6 +419,35 @@ fn run_search(
                         .lock()
                         .expect("files_parsed Mutex was poisoned by a panicked thread");
                     *count_guard += 1;
+
+                    if !no_update_index
+                        && matches!(file_index_status, FileIndexStatus::Stale | FileIndexStatus::NotIndexed)
+                    {
+                        let mut bloom_filter = BloomFilter::new();
+                        bloom_filter.insert_trigrams(&extract_unique_trigrams_from_bytes(source_bytes));
+                        let index_entry = IndexEntry {
+                            path: entry.path().to_path_buf(),
+                            mtime_secs: metadata
+                                .modified()
+                                .ok()
+                                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|duration| duration.as_secs())
+                                .unwrap_or_default(),
+                            file_size_bytes: metadata.len(),
+                            bloom_bits: bloom_filter.to_bytes().to_vec(),
+                            language: language_to_index_name(&detected_lang).to_string(),
+                        };
+                        let mut manifest_guard = index_manifest_ref
+                            .lock()
+                            .expect("index_manifest Mutex was poisoned by a panicked thread");
+                        manifest_guard.upsert_entry(index_entry);
+                        *index_entries_updated_ref
+                            .lock()
+                            .expect("index_entries_updated Mutex was poisoned by a panicked thread") += 1;
+                    }
+
+                    drop(tree);
+                    drop(source);
                 }
                 Err(error) => {
                     let file_error = match &error {
@@ -418,6 +516,26 @@ fn run_search(
             }
         }
     };
+    let sieve_rejected = {
+        match Arc::try_unwrap(sieve_rejected_count) {
+            Ok(mutex) => {
+                mutex.into_inner().expect("sieve_rejected Mutex was poisoned by a panicked thread")
+            }
+            Err(shared) => {
+                *shared.lock().expect("sieve_rejected Mutex was poisoned by a panicked thread")
+            }
+        }
+    };
+    let index_entries_updated = {
+        match Arc::try_unwrap(index_entries_updated_count) {
+            Ok(mutex) => {
+                mutex.into_inner().expect("index_entries_updated Mutex was poisoned by a panicked thread")
+            }
+            Err(shared) => {
+                *shared.lock().expect("index_entries_updated Mutex was poisoned by a panicked thread")
+            }
+        }
+    };
 
     final_results.sort();
     final_results.dedup();
@@ -430,6 +548,8 @@ fn run_search(
         files_walked,
         files_parsed,
         files_skipped,
+        sieve_rejected,
+        index_entries_updated,
         files_with_matches,
     }
 }
@@ -456,9 +576,35 @@ fn main() {
         SearchConfig { queries: cli.query.clone(), root_path: cli.path.clone(), lang_mode };
 
     let compiled_queries = Arc::new(build_compiled_queries(&config));
+    let query_trigram_set = Arc::new(build_query_trigram_set(&config.queries));
+    let index_path = index_path_for_root(config.root_path.as_path());
+    let index_manifest = Arc::new(Mutex::new(match load_index(&index_path) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            if index_path.exists() {
+                eprintln!("warning: [index] {}: {}", index_path.display(), error);
+            }
+            IndexManifest::new(config.root_path.clone())
+        }
+    }));
 
     let started_at = Instant::now();
-    let outcome = run_search(&config, &compiled_queries, &color, cli.quiet);
+    let outcome = run_search(
+        &config,
+        &compiled_queries,
+        &query_trigram_set,
+        &index_manifest,
+        &color,
+        cli.quiet,
+        cli.no_update_index,
+    );
+
+    if !cli.no_update_index && outcome.index_entries_updated > 0 {
+        let manifest_guard = index_manifest
+            .lock()
+            .expect("index_manifest Mutex was poisoned by a panicked thread");
+        let _ = save_index(&manifest_guard, &index_path);
+    }
 
     let stdout = std::io::stdout();
     if !cli.quiet {
@@ -596,6 +742,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         assert!(cli.validate().is_ok());
@@ -610,6 +757,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -631,6 +779,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -648,6 +797,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -812,6 +962,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         assert!(!cli.stats);
@@ -826,6 +977,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         assert!(!cli.quiet);
@@ -876,13 +1028,60 @@ mod tests {
             files_walked: 10,
             files_parsed: 9,
             files_skipped: 1,
+            sieve_rejected: 2,
+            index_entries_updated: 3,
             files_with_matches: 3,
         };
         assert_eq!(outcome.files_walked, 10);
         assert_eq!(outcome.files_parsed, 9);
         assert_eq!(outcome.files_skipped, 1);
+        assert_eq!(outcome.sieve_rejected, 2);
+        assert_eq!(outcome.index_entries_updated, 3);
         assert_eq!(outcome.files_with_matches, 3);
         assert!(outcome.results.is_empty());
+    }
+
+    #[test]
+    fn test_search_outcome_has_sieve_rejected_field() {
+        let outcome = SearchOutcome {
+            results: Vec::new(),
+            files_walked: 0,
+            files_parsed: 0,
+            files_skipped: 0,
+            sieve_rejected: 7,
+            index_entries_updated: 0,
+            files_with_matches: 0,
+        };
+        assert_eq!(outcome.sieve_rejected, 7);
+    }
+
+    #[test]
+    fn test_search_outcome_has_index_entries_updated_field() {
+        let outcome = SearchOutcome {
+            results: Vec::new(),
+            files_walked: 0,
+            files_parsed: 0,
+            files_skipped: 0,
+            sieve_rejected: 0,
+            index_entries_updated: 11,
+            files_with_matches: 0,
+        };
+        assert_eq!(outcome.index_entries_updated, 11);
+    }
+
+    #[test]
+    fn test_no_update_index_flag_defaults_false() {
+        let cli = Cli {
+            query: vec!["(function_item)".to_string()],
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            no_update_index: false,
+            generate_completions: None,
+        };
+        assert!(!cli.no_update_index);
     }
 
     #[test]
@@ -933,6 +1132,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: true,
+            no_update_index: false,
             generate_completions: None,
         };
         assert!(cli.validate().is_ok());
@@ -947,6 +1147,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: Some(Shell::Bash),
         };
         assert!(cli.validate().is_ok());
@@ -961,6 +1162,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -977,6 +1179,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -998,6 +1201,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -1016,6 +1220,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -1038,6 +1243,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         assert!(cli.validate().is_err());
@@ -1053,6 +1259,7 @@ mod tests {
                 no_color: false,
                 quiet: false,
                 stats: false,
+                no_update_index: false,
                 generate_completions: None,
             };
             assert!(cli.validate().is_ok(), "validate() rejected valid lang: {}", lang);
@@ -1068,6 +1275,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -1084,6 +1292,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let result = cli.validate();
@@ -1117,6 +1326,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let msg = cli.validate().unwrap_err();
@@ -1133,6 +1343,7 @@ mod tests {
             no_color: false,
             quiet: false,
             stats: false,
+            no_update_index: false,
             generate_completions: None,
         };
         let msg = cli.validate().unwrap_err();

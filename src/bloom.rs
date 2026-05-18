@@ -1,8 +1,10 @@
+#![allow(dead_code)]
+
 pub const BLOOM_BITS: usize = 4096;
 pub const BLOOM_BYTES: usize = 512;
 pub const NUM_HASH_FUNCTIONS: usize = 2;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BloomFilter {
     bits: [u8; BLOOM_BYTES],
 }

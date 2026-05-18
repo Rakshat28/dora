@@ -1,4 +1,4 @@
-#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::module_name_repetitions, dead_code)]
 
 use crate::types::{AppError, Language, Result};
 use std::cell::RefCell;
@@ -70,6 +70,25 @@ pub fn parse_file_with_threshold(
     threshold: u64,
 ) -> Result<(Tree, FileSource)> {
     let metadata = std::fs::metadata(path).map_err(AppError::IoError)?;
+    parse_file_with_metadata_and_threshold(path, language, &metadata, threshold)
+}
+
+#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+pub fn parse_file_with_metadata(
+    path: &Path,
+    language: &tree_sitter::Language,
+    metadata: &std::fs::Metadata,
+) -> Result<(Tree, FileSource)> {
+    parse_file_with_metadata_and_threshold(path, language, metadata, MMAP_THRESHOLD_BYTES)
+}
+
+#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+fn parse_file_with_metadata_and_threshold(
+    path: &Path,
+    language: &tree_sitter::Language,
+    metadata: &std::fs::Metadata,
+    threshold: u64,
+) -> Result<(Tree, FileSource)> {
     let file_size = metadata.len();
 
     let source = if file_size >= threshold {
