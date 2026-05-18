@@ -56,20 +56,20 @@ fn handle_file_error(error: &FileError, skip_count: &Mutex<usize>) {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "ast-search",
+    name = "dora",
     version,
     author,
     about = "Structural AST-based code search — find code by shape, not by text.",
-    long_about = "ast-search parses source files into Abstract Syntax Trees and \
+    long_about = "dora parses source files into Abstract Syntax Trees and \
                   executes structural pattern queries against them.\n\n\
-                  Unlike grep or ripgrep, ast-search understands code grammar. \
+                  Unlike grep or ripgrep, dora understands code grammar. \
                   It can find function definitions, not just strings that look \
                   like them. It ignores matches inside comments, string literals, \
                   and dead code.\n\n\
                   Queries use Tree-sitter S-expression syntax:\n\
                   \n  \
-                  ast-search -q '(function_item name: (identifier) @fn)' -p ./src\n\n\
-                  See https://github.com/your-org/ast-search for full documentation."
+                  dora -q '(function_item name: (identifier) @fn)' -p ./src\n\n\
+                  See https://github.com/your-org/dora for full documentation."
 )]
 struct Cli {
     #[arg(
@@ -439,7 +439,7 @@ fn main() {
 
     if let Some(shell) = cli.generate_completions {
         let mut cmd = Cli::command();
-        generate(shell, &mut cmd, "ast-search", &mut std::io::stdout());
+        generate(shell, &mut cmd, "dora", &mut std::io::stdout());
         process::exit(0);
     }
 
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn test_cli_validate_nonexistent_path() {
         let cli = Cli {
-            path: PathBuf::from("/tmp/ast_search_nonexistent_xyz_12345"),
+            path: PathBuf::from("/tmp/dora_nonexistent_xyz_12345"),
             query: vec!["(function_item)".to_string()],
             lang: "rust".to_string(),
             no_color: false,
@@ -616,7 +616,7 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
         assert!(err_msg.contains("does not exist"));
-        assert!(err_msg.contains("ast_search_nonexistent_xyz_12345"));
+        assert!(err_msg.contains("dora_nonexistent_xyz_12345"));
     }
 
     #[test]
@@ -972,7 +972,7 @@ mod tests {
     fn test_validate_rejects_nonexistent_path_with_hint() {
         let cli = Cli {
             query: vec!["(fn)".to_string()],
-            path: PathBuf::from("/tmp/ast_search_nonexistent_xyz_99999"),
+            path: PathBuf::from("/tmp/dora_nonexistent_xyz_99999"),
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
@@ -983,7 +983,7 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(msg.contains("does not exist"));
-        assert!(msg.contains("ast_search_nonexistent_xyz_99999"));
+        assert!(msg.contains("dora_nonexistent_xyz_99999"));
         assert!(msg.contains("hint:"));
     }
 

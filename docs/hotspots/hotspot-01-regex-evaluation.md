@@ -1,7 +1,7 @@
 # Hotspot 01: Regex Predicate Evaluation in extract_multi_matches
 
 ## Observed in flamegraph
-Frame: `ast_search::query::extract_multi_matches`
+Frame: `dora::query::extract_multi_matches`
 Child frame: `regex::exec::ExecNoSync::exec_nfa`
 Approximate share of CPU time: 25-40% when queries contain #match? predicates
 

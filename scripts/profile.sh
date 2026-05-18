@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/rust-lang/rust"
-FIXTURE_DIR="/tmp/ast-search-profile-fixture"
+FIXTURE_DIR="/tmp/dora-profile-fixture"
 OUTPUT_DIR="./profiling-output"
 QUERY='(function_item name: (identifier) @fn_name)'
 LANG="rust"
@@ -20,7 +20,7 @@ echo "fixture: $ACTUAL_FILES .rs files in $FIXTURE_DIR"
 cargo build --release 2>/dev/null
 
 START=$(date +%s%3N)
-./target/release/ast-search \
+./target/release/dora \
     -q "$QUERY" \
     -p "$FIXTURE_DIR" \
     --lang "$LANG" \
@@ -33,7 +33,7 @@ echo "baseline wall time: ${ELAPSED}ms"
 
 if command -v cargo-flamegraph &>/dev/null; then
     cargo flamegraph \
-        --bin ast-search \
+        --bin dora \
         --output "$OUTPUT_DIR/flamegraph.svg" \
         -- \
         -q "$QUERY" \

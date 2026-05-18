@@ -1,7 +1,7 @@
-use ast_search::parser::{get_language, parse_file};
-use ast_search::query::{compile_query, extract_matches};
-use ast_search::types::{Language, MatchResult};
-use ast_search::walker::build_walker;
+use dora::parser::{get_language, parse_file};
+use dora::query::{compile_query, extract_matches};
+use dora::types::{Language, MatchResult};
+use dora::walker::build_walker;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -307,7 +307,7 @@ fn test_invalid_query_compile_error() {
     let result = compile_query(&ts_lang, "((( invalid");
 
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ast_search::types::AppError::QueryCompileError(_)));
+    assert!(matches!(result.unwrap_err(), dora::types::AppError::QueryCompileError(_)));
 }
 
 #[test]
@@ -387,8 +387,8 @@ fn validate_inputs(query: &str, path: &str, lang: &str) -> Result<(), String> {
 
 #[test]
 fn test_python_function_name_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -411,8 +411,8 @@ fn test_python_function_name_capture() {
 
 #[test]
 fn test_python_function_line_numbers() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -446,8 +446,8 @@ fn test_python_function_line_numbers() {
 
 #[test]
 fn test_python_walker_finds_py_files() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -472,8 +472,8 @@ fn test_python_walker_finds_py_files() {
 
 #[test]
 fn test_python_walker_includes_pyi_stubs() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -495,8 +495,8 @@ fn test_python_walker_includes_pyi_stubs() {
 
 #[test]
 fn test_python_eq_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -518,8 +518,8 @@ fn test_python_eq_predicate() {
 
 #[test]
 fn test_rust_and_python_results_do_not_mix() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let rust_fixture = fixtures_dir().join("simple.rs");
     let python_fixture = fixtures_dir().join("simple.py");
@@ -565,8 +565,8 @@ fn test_rust_and_python_results_do_not_mix() {
 
 #[test]
 fn test_javascript_function_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -587,8 +587,8 @@ fn test_javascript_function_declaration_capture() {
 
 #[test]
 fn test_javascript_class_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -608,8 +608,8 @@ fn test_javascript_class_declaration_capture() {
 
 #[test]
 fn test_javascript_function_name_exact_position() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -633,8 +633,8 @@ fn test_javascript_function_name_exact_position() {
 
 #[test]
 fn test_typescript_function_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -656,8 +656,8 @@ fn test_typescript_function_declaration_capture() {
 
 #[test]
 fn test_typescript_interface_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -679,8 +679,8 @@ fn test_typescript_interface_declaration_capture() {
 
 #[test]
 fn test_typescript_type_alias_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -701,8 +701,8 @@ fn test_typescript_type_alias_capture() {
 
 #[test]
 fn test_typescript_class_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -723,8 +723,8 @@ fn test_typescript_class_declaration_capture() {
 
 #[test]
 fn test_javascript_walker_extensions() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -753,8 +753,8 @@ fn test_javascript_walker_extensions() {
 
 #[test]
 fn test_typescript_walker_extensions() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -785,8 +785,8 @@ fn test_typescript_walker_extensions() {
 
 #[test]
 fn test_js_and_ts_results_do_not_mix() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let js_fixture = fixtures_dir().join("simple.js");
     let ts_fixture = fixtures_dir().join("simple.ts");
@@ -828,8 +828,8 @@ fn test_js_and_ts_results_do_not_mix() {
 
 #[test]
 fn test_typescript_interface_query_compiles() {
-    use ast_search::parser::get_language;
-    use ast_search::query::compile_query;
+    use dora::parser::get_language;
+    use dora::query::compile_query;
 
     let lang = get_language("ts").unwrap();
     let result = compile_query(&lang, "(interface_declaration name: (type_identifier) @name)");
@@ -838,8 +838,8 @@ fn test_typescript_interface_query_compiles() {
 
 #[test]
 fn test_js_grammar_rejects_typescript_node_type() {
-    use ast_search::parser::get_language;
-    use ast_search::query::compile_query;
+    use dora::parser::get_language;
+    use dora::query::compile_query;
 
     let js_lang = get_language("js").unwrap();
     let result = compile_query(&js_lang, "(interface_declaration name: (type_identifier) @name)");
@@ -851,8 +851,8 @@ fn test_js_grammar_rejects_typescript_node_type() {
 
 #[test]
 fn test_go_function_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -874,8 +874,8 @@ fn test_go_function_declaration_capture() {
 
 #[test]
 fn test_go_function_exact_positions() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -906,8 +906,8 @@ fn test_go_function_exact_positions() {
 
 #[test]
 fn test_go_struct_type_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -932,8 +932,8 @@ fn test_go_struct_type_declaration_capture() {
 
 #[test]
 fn test_go_eq_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -955,8 +955,8 @@ fn test_go_eq_predicate() {
 
 #[test]
 fn test_go_match_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -981,8 +981,8 @@ fn test_go_match_predicate() {
 
 #[test]
 fn test_go_walker_finds_go_files_only() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1011,8 +1011,8 @@ fn test_go_walker_finds_go_files_only() {
 
 #[test]
 fn test_go_and_rust_results_do_not_mix() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let go_fixture = fixtures_dir().join("simple.go");
     let rust_fixture = fixtures_dir().join("simple.rs");
@@ -1047,8 +1047,8 @@ fn test_go_and_rust_results_do_not_mix() {
 
 #[test]
 fn test_go_grammar_rejects_rust_node_type() {
-    use ast_search::parser::get_language;
-    use ast_search::query::compile_query;
+    use dora::parser::get_language;
+    use dora::query::compile_query;
 
     let go_lang = get_language("go").unwrap();
     let result = compile_query(&go_lang, "(function_item name: (identifier) @fn_name)");
@@ -1060,8 +1060,8 @@ fn test_go_grammar_rejects_rust_node_type() {
 
 #[test]
 fn test_all_five_languages_compile_queries() {
-    use ast_search::parser::get_language;
-    use ast_search::query::compile_query;
+    use dora::parser::get_language;
+    use dora::query::compile_query;
 
     let cases = vec![
         ("rust", "(function_item name: (identifier) @fn_name)"),
@@ -1080,7 +1080,7 @@ fn test_all_five_languages_compile_queries() {
 
 #[test]
 fn test_all_five_languages_parse_minimal_source() {
-    use ast_search::parser::{get_language, parse_file};
+    use dora::parser::{get_language, parse_file};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -1113,8 +1113,8 @@ fn test_all_five_languages_parse_minimal_source() {
 
 #[test]
 fn test_c_function_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1139,8 +1139,8 @@ fn test_c_function_declaration_capture() {
 
 #[test]
 fn test_c_function_exact_positions() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1175,8 +1175,8 @@ fn test_c_function_exact_positions() {
 
 #[test]
 fn test_c_typedef_name_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1197,8 +1197,8 @@ fn test_c_typedef_name_capture() {
 
 #[test]
 fn test_cpp_class_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1232,8 +1232,8 @@ fn test_cpp_class_declaration_capture() {
 
 #[test]
 fn test_cpp_struct_declaration_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1254,8 +1254,8 @@ fn test_cpp_struct_declaration_capture() {
 
 #[test]
 fn test_cpp_free_function_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1279,8 +1279,8 @@ fn test_cpp_free_function_capture() {
 
 #[test]
 fn test_c_walker_extensions() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1309,8 +1309,8 @@ fn test_c_walker_extensions() {
 
 #[test]
 fn test_cpp_walker_extensions() {
-    use ast_search::types::Language;
-    use ast_search::walker::build_walker;
+    use dora::types::Language;
+    use dora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1345,8 +1345,8 @@ fn test_cpp_walker_extensions() {
 
 #[test]
 fn test_c_eq_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1371,8 +1371,8 @@ fn test_c_eq_predicate() {
 
 #[test]
 fn test_cpp_eq_predicate_class() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1394,8 +1394,8 @@ fn test_cpp_eq_predicate_class() {
 
 #[test]
 fn test_all_seven_languages_compile_queries() {
-    use ast_search::parser::get_language;
-    use ast_search::query::compile_query;
+    use dora::parser::get_language;
+    use dora::query::compile_query;
 
     let cases = vec![
         ("rust",   "(function_item name: (identifier) @fn_name)"),
@@ -1416,7 +1416,7 @@ fn test_all_seven_languages_compile_queries() {
 
 #[test]
 fn test_all_seven_languages_parse_minimal_source() {
-    use ast_search::parser::{get_language, parse_file};
+    use dora::parser::{get_language, parse_file};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -1451,8 +1451,8 @@ fn test_all_seven_languages_parse_minimal_source() {
 
 #[test]
 fn test_c_and_cpp_results_do_not_mix() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let c_fixture = fixtures_dir().join("simple.c");
     let cpp_fixture = fixtures_dir().join("simple.cpp");
@@ -1489,8 +1489,8 @@ fn test_c_and_cpp_results_do_not_mix() {
 
 fn auto_compiled_queries(
     query_str: &str,
-) -> std::collections::HashMap<Language, Arc<ast_search::query::CompiledQuery>> {
-    ast_search::parser::get_all_languages()
+) -> std::collections::HashMap<Language, Arc<dora::query::CompiledQuery>> {
+    dora::parser::get_all_languages()
         .into_iter()
         .filter_map(|(lang, ts_lang)| {
             compile_query(&ts_lang, query_str).ok().map(|query| (lang, query))
@@ -1499,8 +1499,8 @@ fn auto_compiled_queries(
 }
 
 fn auto_results(query_str: &str) -> Vec<MatchResult> {
-    use ast_search::parser::{detect_language, get_all_languages, parse_file};
-    use ast_search::walker::build_auto_walker;
+    use dora::parser::{detect_language, get_all_languages, parse_file};
+    use dora::walker::build_auto_walker;
 
     let compiled = Arc::new(auto_compiled_queries(query_str));
     let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
@@ -1554,7 +1554,7 @@ fn auto_results(query_str: &str) -> Vec<MatchResult> {
 
 #[test]
 fn test_auto_mode_finds_rust_functions() {
-    use ast_search::parser::get_all_languages;
+    use dora::parser::get_all_languages;
 
     let query_str = "(function_item name: (identifier) @fn_name)";
     let compiled = auto_compiled_queries(query_str);
@@ -1593,7 +1593,7 @@ fn test_auto_mode_finds_multiple_languages() {
 
 #[test]
 fn test_detect_language_no_extension_returns_none() {
-    use ast_search::parser::detect_language;
+    use dora::parser::detect_language;
 
     assert_eq!(detect_language(Path::new("Makefile")), None);
     assert_eq!(detect_language(Path::new("Dockerfile")), None);
@@ -1631,8 +1631,8 @@ fn test_auto_mode_zero_languages_after_filter() {
 
 #[test]
 fn test_python_nested_closure_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
@@ -1669,8 +1669,8 @@ fn test_python_nested_closure_capture() {
 
 #[test]
 fn test_javascript_arrow_function_params_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("arrow_params.js");
     let lang = get_language("js").unwrap();
@@ -1701,8 +1701,8 @@ fn test_javascript_arrow_function_params_capture() {
 
 #[test]
 fn test_typescript_interface_regex_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("interfaces.ts");
     let lang = get_language("ts").unwrap();
@@ -1731,8 +1731,8 @@ fn test_typescript_interface_regex_predicate() {
 
 #[test]
 fn test_go_struct_exact_match_predicate() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("structs.go");
     let lang = get_language("go").unwrap();
@@ -1759,8 +1759,8 @@ fn test_go_struct_exact_match_predicate() {
 
 #[test]
 fn test_cpp_virtual_keyword_capture() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("virtual_keywords.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1789,8 +1789,8 @@ fn test_cpp_virtual_keyword_capture() {
 
 #[test]
 fn test_cpp_anonymous_destructor_node() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("virtual_keywords.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1906,8 +1906,8 @@ fn test_auto_mode_no_memory_leak_with_mixed_languages() {
 
 #[test]
 fn test_nested_python_closure_line_accuracy() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
@@ -1934,8 +1934,8 @@ fn test_nested_python_closure_line_accuracy() {
 
 #[test]
 fn test_typescript_interface_count_with_regex() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("interfaces.ts");
     let lang = get_language("ts").unwrap();
@@ -1966,8 +1966,8 @@ fn test_typescript_interface_count_with_regex() {
 
 #[test]
 fn test_go_struct_selective_extraction() {
-    use ast_search::parser::{get_language, parse_file};
-    use ast_search::query::{compile_query, extract_matches};
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("structs.go");
     let lang = get_language("go").unwrap();

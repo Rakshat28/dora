@@ -1,5 +1,5 @@
-use ast_search::parser::{get_language, parse_file_with_threshold};
-use ast_search::query::{compile_multi_query, extract_multi_matches};
+use dora::parser::{get_language, parse_file_with_threshold};
+use dora::query::{compile_multi_query, extract_multi_matches};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::io::Write;
 use std::path::PathBuf;
@@ -158,7 +158,7 @@ fn bench_multi_query_overhead(c: &mut Criterion) {
 }
 
 fn bench_parallel_search_100_files(c: &mut Criterion) {
-    use ast_search::types::MatchResult;
+    use dora::types::MatchResult;
     use rayon::prelude::*;
     use std::sync::{Arc, Mutex};
 
@@ -206,7 +206,7 @@ fn bench_parallel_search_100_files(c: &mut Criterion) {
 }
 
 fn bench_query_compilation_all_languages(c: &mut Criterion) {
-    use ast_search::parser::get_all_languages;
+    use dora::parser::get_all_languages;
 
     let query_str = "(identifier) @id";
 

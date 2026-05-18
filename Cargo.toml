@@ -1,5 +1,5 @@
 [package]
-name = "ast-search"
+name = "dora"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 debug = 1
 
 [[bin]]
-name = "ast-search"
+name = "dora"
 path = "src/main.rs"
 
 [dependencies]

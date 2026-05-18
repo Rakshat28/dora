@@ -1,4 +1,4 @@
-# Profiling ast-search
+# Profiling dora
 
 ## Prerequisites
 
@@ -33,8 +33,8 @@ Generate flamegraph:
 
 Wide frames = more CPU time spent there.
 Look for wide frames in:
-  ast_search::query::extract_multi_matches  — traversal hot path
-  ast_search::parser::parse_file            — I/O and FFI boundary
+  dora::query::extract_multi_matches  — traversal hot path
+  dora::parser::parse_file            — I/O and FFI boundary
   tree_sitter::query::QueryCursor::matches  — tree-sitter internals
 
 ## Performance target
@@ -42,7 +42,7 @@ Look for wide frames in:
 Under 1000ms for a 10,000-file Rust repository on a modern 8-core machine.
 
 Measure with:
-  time ./target/release/ast-search \
+  time ./target/release/dora \
     -q '(function_item name: (identifier) @fn_name)' \
     -p /path/to/10k-file-repo \
     --lang rust --no-color --quiet 2>/dev/null

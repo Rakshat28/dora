@@ -7,15 +7,15 @@ install-flamegraph:
 	cargo install flamegraph
 
 flamegraph:
-	cargo flamegraph --bin ast-search -- \
+	cargo flamegraph --bin dora -- \
 		-q '(function_item name: (identifier) @fn_name)' \
-		-p /tmp/ast-search-profile-fixture \
+		-p /tmp/dora-profile-fixture \
 		--lang rust --no-color --quiet
 
 baseline:
 	@echo "measuring baseline on fixture repo..."
-	@time ./target/release/ast-search \
+	@time ./target/release/dora \
 		-q '(function_item name: (identifier) @fn_name)' \
-		-p /tmp/ast-search-profile-fixture \
+		-p /tmp/dora-profile-fixture \
 		--lang rust --no-color --quiet \
 		2>/dev/null | wc -l

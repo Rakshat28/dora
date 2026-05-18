@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_parse_file_nonexistent_path_returns_io_error() {
         let result = parse_file(
-            Path::new("/tmp/ast_search_this_file_does_not_exist_xyz.rs"),
+            Path::new("/tmp/dora_this_file_does_not_exist_xyz.rs"),
             &get_language("rust").unwrap(),
         );
 

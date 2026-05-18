@@ -1,7 +1,7 @@
 # Hotspot 02: PathBuf Allocation Per MatchResult
 
 ## Observed in flamegraph
-Frame: `ast_search::query::extract_multi_matches`
+Frame: `dora::query::extract_multi_matches`
 Child frame: `std::path::PathBuf::clone` → `alloc::string::String::push_str`
 Approximate share of CPU time: 10-20% on repos with high match density
 
