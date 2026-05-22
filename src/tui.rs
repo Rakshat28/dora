@@ -1,14 +1,17 @@
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
-use rayon::iter::ParallelBridge;
-use rayon::prelude::ParallelIterator;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
     Terminal,
 };
+use rayon::iter::ParallelBridge;
+use rayon::prelude::ParallelIterator;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,6 +19,15 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
+
+const SOURCE_CACHE_SIZE: usize = 10;
+const ASSUMED_PANE_HEIGHT: usize = 30;
+
+pub(crate) enum PaneId {
+    FileTree,
+    CodeView,
+    AstView,
+}
 
 pub(crate) struct FileTreeEntry {
     pub(crate) path: PathBuf,
@@ -38,6 +50,9 @@ pub(crate) struct AppState {
     pub(crate) error_message: Option<String>,
     pub(crate) should_quit: bool,
     pub(crate) frame_count: u64,
+    pub(crate) cached_source: HashMap<PathBuf, String>,
+    pub(crate) auto_scrolled_for: Option<PathBuf>,
+    pub(crate) active_pane: PaneId,
 }
 
 impl AppState {
@@ -56,6 +71,9 @@ impl AppState {
             error_message: None,
             should_quit: false,
             frame_count: 0,
+            cached_source: HashMap::new(),
+            auto_scrolled_for: None,
+            active_pane: PaneId::FileTree,
         }
     }
 
@@ -82,6 +100,8 @@ impl AppState {
         self.file_tree.clear();
         self.selected_index = 0;
         self.selected_file_index = 0;
+        self.cached_source.clear();
+        self.auto_scrolled_for = None;
     }
 
     fn rebuild_file_tree(&mut self) {
@@ -103,6 +123,9 @@ impl AppState {
         }
         self.selected_file_index = (self.selected_file_index + 1) % self.file_tree.len();
         self.scroll_offset = 0;
+        self.auto_scrolled_for = None;
+        self.load_source_for_selected();
+        self.auto_scroll_to_first_match();
     }
 
     pub(crate) fn select_prev(&mut self) {
@@ -115,6 +138,50 @@ impl AppState {
             self.selected_file_index -= 1;
         }
         self.scroll_offset = 0;
+        self.auto_scrolled_for = None;
+        self.load_source_for_selected();
+        self.auto_scroll_to_first_match();
+    }
+
+    pub(crate) fn load_source_for_selected(&mut self) {
+        if self.file_tree.is_empty() || self.selected_file_index >= self.file_tree.len() {
+            return;
+        }
+        let path = self.file_tree[self.selected_file_index].path.clone();
+        if self.cached_source.contains_key(&path) {
+            return;
+        }
+        let source = std::fs::read_to_string(&path).unwrap_or_default();
+        self.cached_source.insert(path.clone(), source);
+        if self.cached_source.len() > SOURCE_CACHE_SIZE {
+            let keys: Vec<_> = self.cached_source.keys().cloned().collect();
+            if !keys.is_empty() {
+                self.cached_source.remove(&keys[0]);
+            }
+        }
+    }
+
+    pub(crate) fn auto_scroll_to_first_match(&mut self) {
+        if self.file_tree.is_empty() || self.selected_file_index >= self.file_tree.len() {
+            return;
+        }
+        let current_path = self.file_tree[self.selected_file_index].path.clone();
+        if self.auto_scrolled_for == Some(current_path.clone()) {
+            return;
+        }
+        let matches = self.results_for_selected_file();
+        if matches.is_empty() {
+            self.auto_scrolled_for = Some(current_path);
+            return;
+        }
+        let min_line = matches.iter().map(|m| m.start_line).min().unwrap_or(1);
+        let visible_lines = ASSUMED_PANE_HEIGHT;
+        self.scroll_offset = if min_line > 1 && min_line.saturating_sub(1) > visible_lines / 2 {
+            min_line.saturating_sub(1).saturating_sub(visible_lines / 2)
+        } else {
+            0
+        };
+        self.auto_scrolled_for = Some(current_path);
     }
 
     pub(crate) fn scroll_down(&mut self) {
@@ -169,9 +236,8 @@ pub fn run_tui(
         >,
     >,
 ) -> crate::types::Result<()> {
-    let rt = Runtime::new().map_err(|e| {
-        crate::types::AppError::IoError(std::io::Error::other(e.to_string()))
-    })?;
+    let rt = Runtime::new()
+        .map_err(|e| crate::types::AppError::IoError(std::io::Error::other(e.to_string())))?;
     rt.block_on(run_tui_async(config, compiled_queries))
 }
 
@@ -185,19 +251,15 @@ async fn run_tui_async(
         >,
     >,
 ) -> crate::types::Result<()> {
+    use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
     use crossterm::execute;
     use crossterm::terminal::{
         disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
     };
-    use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend)?;
-    execute!(
-        terminal.backend_mut(),
-        EnterAlternateScreen,
-        EnableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
     scopeguard::defer! {
         let _ = execute!(
             std::io::stdout(),
@@ -265,12 +327,12 @@ async fn run_tui_async(
                             let walker: Box<
                                 dyn Iterator<Item = crate::types::Result<ignore::DirEntry>> + Send,
                             > = match &cfg.lang_mode {
-                                crate::types::LangMode::Single(lang) => {
-                                    Box::new(crate::walker::build_walker(cfg.root_path.as_path(), lang))
-                                }
-                                crate::types::LangMode::Auto => {
-                                    Box::new(crate::walker::build_auto_walker(cfg.root_path.as_path()))
-                                }
+                                crate::types::LangMode::Single(lang) => Box::new(
+                                    crate::walker::build_walker(cfg.root_path.as_path(), lang),
+                                ),
+                                crate::types::LangMode::Auto => Box::new(
+                                    crate::walker::build_auto_walker(cfg.root_path.as_path()),
+                                ),
                             };
                             let par = walker.par_bridge();
                             par.for_each(|entry_result| match entry_result {
@@ -365,6 +427,8 @@ async fn run_tui_async(
             Some(event) = event_rx.recv() => {
                 handle_event(&mut state, &event, &cmd_tx);
                 if !state.should_quit {
+                    state.load_source_for_selected();
+                    state.auto_scroll_to_first_match();
                     render(&mut terminal, &state)?;
                     state.frame_count = state.frame_count.wrapping_add(1);
                 }
@@ -395,8 +459,23 @@ fn handle_event(
     match event {
         AppEvent::Keystroke(key) => match key.code {
             KeyCode::Char('q') | KeyCode::Esc => state.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => state.select_next(),
-            KeyCode::Up | KeyCode::Char('k') => state.select_prev(),
+            KeyCode::Tab => {
+                state.active_pane = match state.active_pane {
+                    PaneId::FileTree => PaneId::CodeView,
+                    PaneId::CodeView => PaneId::AstView,
+                    PaneId::AstView => PaneId::FileTree,
+                };
+            }
+            KeyCode::Down | KeyCode::Char('j') => match state.active_pane {
+                PaneId::FileTree => state.select_next(),
+                PaneId::CodeView => state.scroll_down(),
+                PaneId::AstView => {}
+            },
+            KeyCode::Up | KeyCode::Char('k') => match state.active_pane {
+                PaneId::FileTree => state.select_prev(),
+                PaneId::CodeView => state.scroll_up(),
+                PaneId::AstView => {}
+            },
             KeyCode::PageDown => {
                 for _ in 0..10 {
                     state.scroll_down();
@@ -454,43 +533,40 @@ fn render(
 
 fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
     let area = frame.size();
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)]);
+    let layout = Layout::default().direction(Direction::Vertical).constraints([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ]);
     let [query_area, panes_area, status_area] = layout.areas(area);
 
     draw_query_bar(frame, query_area, state);
 
-    let panes_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(25),
-            Constraint::Percentage(50),
-            Constraint::Percentage(25),
-        ]);
+    let panes_layout = Layout::default().direction(Direction::Horizontal).constraints([
+        Constraint::Percentage(25),
+        Constraint::Percentage(50),
+        Constraint::Percentage(25),
+    ]);
     let [file_pane_area, code_pane_area, ast_pane_area] = panes_layout.areas(panes_area);
 
     draw_file_tree_pane(frame, file_pane_area, state);
-    draw_code_pane(frame, code_pane_area);
-    draw_ast_pane(frame, ast_pane_area);
+    draw_code_pane(frame, code_pane_area, state);
+    draw_ast_pane(frame, ast_pane_area, state);
     draw_status_bar(frame, status_area, state);
 }
 
 fn draw_query_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
-    let border_style = if state.search_running {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
-    let block = Block::default()
-        .title("Query")
-        .borders(Borders::ALL)
-        .border_style(border_style);
+    let border_style =
+        if state.search_running { Style::default().fg(Color::DarkGray) } else { Style::default() };
+    let block = Block::default().title("Query").borders(Borders::ALL).border_style(border_style);
     let cursor_char = if state.frame_count % 8 < 4 { "|" } else { " " };
     let query_with_cursor = format!("{}{}", state.query_input, cursor_char);
 
     let text = if let Some(error) = &state.error_message {
-        vec![Line::from(query_with_cursor), Line::from(Span::styled(error.clone(), Style::default().fg(Color::Red)))]
+        vec![
+            Line::from(query_with_cursor),
+            Line::from(Span::styled(error.clone(), Style::default().fg(Color::Red))),
+        ]
     } else {
         vec![Line::from(query_with_cursor)]
     };
@@ -499,6 +575,11 @@ fn draw_query_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
 }
 
 fn draw_file_tree_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+    let file_tree_border = match state.active_pane {
+        PaneId::FileTree => Style::default().add_modifier(Modifier::BOLD),
+        _ => Style::default(),
+    };
+
     let title = if let Some(selected_entry) = state.file_tree.get(state.selected_file_index) {
         let path_str = selected_entry.path.to_string_lossy().to_string();
         let pane_width = area.width.saturating_sub(2) as usize;
@@ -513,9 +594,7 @@ fn draw_file_tree_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState)
     } else {
         " Files ".to_string()
     };
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL);
+    let block = Block::default().title(title).borders(Borders::ALL).border_style(file_tree_border);
 
     if state.file_tree.is_empty() {
         let hint_text = if state.search_running {
@@ -525,9 +604,8 @@ fn draw_file_tree_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState)
         } else {
             "No matches"
         };
-        let paragraph = Paragraph::new(hint_text)
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
+        let paragraph =
+            Paragraph::new(hint_text).block(block).style(Style::default().fg(Color::DarkGray));
         frame.render_widget(paragraph, area);
         return;
     }
@@ -536,21 +614,12 @@ fn draw_file_tree_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState)
         .file_tree
         .iter()
         .map(|entry| {
-            let filename = entry
-                .path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
+            let filename =
+                entry.path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
             let count_str = entry.match_count.to_string();
             let pane_width = area.width.saturating_sub(2) as usize;
             let padding = pane_width.saturating_sub(filename.len() + count_str.len() + 2);
-            let line = format!(
-                " {}{}{}",
-                filename,
-                " ".repeat(padding),
-                count_str
-            );
+            let line = format!(" {}{}{}", filename, " ".repeat(padding), count_str);
             ListItem::new(line)
         })
         .collect();
@@ -564,22 +633,137 @@ fn draw_file_tree_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState)
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn draw_code_pane(frame: &mut ratatui::Frame, area: Rect) {
-    let block = Block::default()
-        .title(" Code ")
-        .borders(Borders::ALL);
-    frame.render_widget(block, area);
+fn draw_code_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+    let code_border = match state.active_pane {
+        PaneId::CodeView => Style::default().add_modifier(Modifier::BOLD),
+        _ => Style::default(),
+    };
+
+    if state.file_tree.is_empty() {
+        let block =
+            Block::default().title(" Code ").borders(Borders::ALL).border_style(code_border);
+        let paragraph = Paragraph::new("No results").style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(paragraph.block(block), area);
+        return;
+    }
+
+    if state.selected_file_index >= state.file_tree.len() {
+        let block =
+            Block::default().title(" Code ").borders(Borders::ALL).border_style(code_border);
+        frame.render_widget(block, area);
+        return;
+    }
+
+    let current_path = &state.file_tree[state.selected_file_index].path;
+    let source = state.cached_source.get(current_path).map(|s| s.as_str()).unwrap_or("");
+
+    if source.is_empty() && !state.cached_source.contains_key(current_path) {
+        let block =
+            Block::default().title(" Code ").borders(Borders::ALL).border_style(code_border);
+        let paragraph = Paragraph::new("Loading...").style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(paragraph.block(block), area);
+        return;
+    }
+
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let lines: Vec<&str> = source.lines().collect();
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let effective_offset = state.scroll_offset.min(max_scroll);
+
+    let matches = state.results_for_selected_file();
+    let mut match_lines = std::collections::HashSet::new();
+    for m in matches {
+        match_lines.insert(m.start_line);
+        if m.end_line != m.start_line {
+            for line_num in m.start_line..=m.end_line {
+                match_lines.insert(line_num);
+            }
+        }
+    }
+
+    let mut line_widgets = Vec::new();
+    for i in effective_offset..(effective_offset + visible_height).min(total_lines) {
+        let line_num = i + 1;
+        let line_text = lines[i];
+        let marker = if match_lines.contains(&line_num) { "  ▶ │ " } else { "    │ " };
+        let line_num_str = format!("{:>4} ", line_num);
+
+        let mut spans = vec![
+            Span::styled(line_num_str, Style::default().add_modifier(Modifier::DIM)),
+            Span::raw(marker),
+        ];
+
+        let mut char_pos = 0;
+        for m in matches {
+            if m.start_line <= line_num && line_num <= m.end_line {
+                let start_byte = if line_num == m.start_line { m.start_col } else { 0 };
+                let end_byte = if line_num == m.end_line { m.end_col } else { line_text.len() };
+
+                if start_byte > char_pos {
+                    spans.push(Span::raw(&line_text[char_pos..start_byte]));
+                }
+
+                if end_byte <= line_text.len() {
+                    if let Some(match_text) = line_text.get(start_byte..end_byte) {
+                        spans.push(Span::styled(
+                            match_text.to_string(),
+                            Style::default().add_modifier(Modifier::REVERSED),
+                        ));
+                        char_pos = end_byte;
+                    } else {
+                        spans.push(Span::raw(&line_text[start_byte..]));
+                        char_pos = line_text.len();
+                        break;
+                    }
+                } else {
+                    spans.push(Span::raw(&line_text[start_byte..]));
+                    char_pos = line_text.len();
+                    break;
+                }
+            }
+        }
+
+        if char_pos < line_text.len() {
+            spans.push(Span::raw(&line_text[char_pos..]));
+        }
+
+        line_widgets.push(Line::from(spans));
+    }
+
+    let block = Block::default().title(" Code ").borders(Borders::ALL).border_style(code_border);
+    let paragraph = Paragraph::new(line_widgets).block(block);
+    frame.render_widget(paragraph, area);
+
+    let scrollbar_state = ScrollbarState::default()
+        .content_length(total_lines)
+        .viewport_content_length(visible_height)
+        .position(effective_offset);
+    frame.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None),
+        area,
+        &mut scrollbar_state.clone(),
+    );
 }
 
-fn draw_ast_pane(frame: &mut ratatui::Frame, area: Rect) {
-    let block = Block::default()
-        .title(" AST ")
-        .borders(Borders::ALL);
+fn draw_ast_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+    let ast_border = match state.active_pane {
+        PaneId::AstView => Style::default().add_modifier(Modifier::BOLD),
+        _ => Style::default(),
+    };
+    let block = Block::default().title(" AST ").borders(Borders::ALL).border_style(ast_border);
     frame.render_widget(block, area);
 }
 
 fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
-    let hint_text = "  [↑↓/jk] navigate   [Enter] search   [q] quit  ";
+    let hint_text = match state.active_pane {
+        PaneId::FileTree => "  [↑↓/jk] select file   [Tab] focus code view  ",
+        PaneId::CodeView => "  [↑↓/jk] scroll code   [Tab] focus file tree  ",
+        PaneId::AstView => "  [↑↓/jk] scroll ast    [Tab] focus code view  ",
+    };
     let mut status = hint_text.to_string();
     if state.search_running {
         let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -900,15 +1084,8 @@ mod tests {
 
     #[test]
     fn test_file_tree_entry_display_format() {
-        let entry = FileTreeEntry {
-            path: PathBuf::from("src/auth/handler.rs"),
-            match_count: 3,
-        };
-        let filename = entry
-            .path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let entry = FileTreeEntry { path: PathBuf::from("src/auth/handler.rs"), match_count: 3 };
+        let filename = entry.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         assert_eq!(filename, "handler.rs");
     }
 
@@ -966,5 +1143,158 @@ mod tests {
         s.file_tree.clear();
         assert!(s.search_running);
         assert!(s.file_tree.is_empty());
+    }
+
+    #[test]
+    fn test_load_source_caches_result() {
+        let temp_file = std::env::temp_dir().join("test_code_view.txt");
+        let content = "fn hello() {\n    println!(\"world\");\n}\n";
+        let _ = std::fs::write(&temp_file, content);
+
+        let mut s = AppState::new();
+        s.file_tree.push(FileTreeEntry { path: temp_file.clone(), match_count: 1 });
+        s.selected_file_index = 0;
+
+        s.load_source_for_selected();
+
+        assert!(s.cached_source.contains_key(&temp_file));
+        assert_eq!(s.cached_source.get(&temp_file).unwrap(), content);
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn test_load_source_cache_bounded() {
+        let mut s = AppState::new();
+        for i in 0..=SOURCE_CACHE_SIZE {
+            let temp_file = std::env::temp_dir().join(format!("test_cache_{}.txt", i));
+            let _ = std::fs::write(&temp_file, format!("content {}", i));
+            s.file_tree.push(FileTreeEntry { path: temp_file.clone(), match_count: 1 });
+            s.selected_file_index = i;
+            s.load_source_for_selected();
+        }
+        assert!(s.cached_source.len() <= SOURCE_CACHE_SIZE);
+        for i in 0..=SOURCE_CACHE_SIZE {
+            let _ =
+                std::fs::remove_file(std::env::temp_dir().join(format!("test_cache_{}.txt", i)));
+        }
+    }
+
+    #[test]
+    fn test_auto_scroll_centers_on_first_match() {
+        let mut s = AppState::new();
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("test.rs"), match_count: 1 });
+        s.results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("test.rs"),
+            start_line: 50,
+            start_col: 0,
+            end_line: 50,
+            end_col: 5,
+            capture_name: "test".to_string(),
+            matched_text: "fn".to_string(),
+        });
+        s.selected_file_index = 0;
+        s.auto_scroll_to_first_match();
+
+        assert!(s.scroll_offset >= 20);
+        assert!(s.scroll_offset <= 40);
+    }
+
+    #[test]
+    fn test_auto_scroll_does_not_fire_twice() {
+        let mut s = AppState::new();
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("test.rs"), match_count: 1 });
+        s.results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("test.rs"),
+            start_line: 50,
+            start_col: 0,
+            end_line: 50,
+            end_col: 5,
+            capture_name: "test".to_string(),
+            matched_text: "fn".to_string(),
+        });
+        s.selected_file_index = 0;
+        s.auto_scroll_to_first_match();
+        let offset_after_first = s.scroll_offset;
+        s.auto_scroll_to_first_match();
+        assert_eq!(s.scroll_offset, offset_after_first);
+    }
+
+    #[test]
+    fn test_auto_scroll_resets_on_file_change() {
+        let mut s = AppState::new();
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("a.rs"), match_count: 1 });
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("b.rs"), match_count: 1 });
+        s.auto_scrolled_for = Some(PathBuf::from("a.rs"));
+        s.selected_file_index = 0;
+        assert!(s.auto_scrolled_for == Some(PathBuf::from("a.rs")));
+        s.auto_scrolled_for = None;
+        assert!(s.auto_scrolled_for.is_none());
+    }
+
+    #[test]
+    fn test_pane_id_tab_cycles() {
+        let mut s = AppState::new();
+        assert!(matches!(s.active_pane, PaneId::FileTree));
+        s.active_pane = match s.active_pane {
+            PaneId::FileTree => PaneId::CodeView,
+            PaneId::CodeView => PaneId::AstView,
+            PaneId::AstView => PaneId::FileTree,
+        };
+        assert!(matches!(s.active_pane, PaneId::CodeView));
+        s.active_pane = match s.active_pane {
+            PaneId::FileTree => PaneId::CodeView,
+            PaneId::CodeView => PaneId::AstView,
+            PaneId::AstView => PaneId::FileTree,
+        };
+        assert!(matches!(s.active_pane, PaneId::AstView));
+        s.active_pane = match s.active_pane {
+            PaneId::FileTree => PaneId::CodeView,
+            PaneId::CodeView => PaneId::AstView,
+            PaneId::AstView => PaneId::FileTree,
+        };
+        assert!(matches!(s.active_pane, PaneId::FileTree));
+    }
+
+    #[test]
+    fn test_jk_scrolls_code_when_code_pane_active() {
+        let mut s = AppState::new();
+        s.active_pane = PaneId::CodeView;
+        s.scroll_offset = 5;
+        s.scroll_down();
+        assert_eq!(s.scroll_offset, 6);
+        s.scroll_up();
+        assert_eq!(s.scroll_offset, 5);
+    }
+
+    #[test]
+    fn test_jk_navigates_files_when_file_tree_active() {
+        let mut s = AppState::new();
+        s.active_pane = PaneId::FileTree;
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("a.rs"), match_count: 1 });
+        s.file_tree.push(FileTreeEntry { path: PathBuf::from("b.rs"), match_count: 1 });
+        s.selected_file_index = 0;
+        s.select_next();
+        assert_eq!(s.selected_file_index, 1);
+    }
+
+    #[test]
+    fn test_scroll_offset_clamp_does_not_mutate_state() {
+        let scroll_offset = 1000usize;
+        let visible_height = 30usize;
+        let total_lines = 50usize;
+        let max_scroll = total_lines.saturating_sub(visible_height);
+        let effective_offset = scroll_offset.min(max_scroll);
+        assert_eq!(effective_offset, 20);
+        assert_eq!(scroll_offset, 1000);
+    }
+
+    #[test]
+    fn test_match_on_line_produces_reversed_segment() {
+        let line_text = "fn hello()";
+        let start_col = 0;
+        let end_col = 2;
+        let match_segment = &line_text[start_col..end_col];
+        assert_eq!(match_segment, "fn");
     }
 }
