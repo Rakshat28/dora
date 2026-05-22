@@ -34,6 +34,7 @@ crossterm  = { version = "0.27", features = ["event-stream"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
+scopeguard = "1"
 
 [dev-dependencies]
 tempfile = "3"
