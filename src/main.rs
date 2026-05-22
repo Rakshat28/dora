@@ -21,6 +21,7 @@ mod parser;
 mod query;
 mod sieve;
 mod trigram;
+mod tui;
 mod types;
 pub mod walker;
 
@@ -134,6 +135,13 @@ struct Cli {
         help = "Suppress per-match output lines — only print the summary"
     )]
     quiet: bool,
+
+    #[arg(
+        long = "tui",
+        default_value_t = false,
+        help = "Launch the interactive terminal UI instead of stdout output"
+    )]
+    tui: bool,
 
     #[arg(
         long = "stats",
@@ -583,6 +591,17 @@ fn main() {
         SearchConfig { queries: cli.query.clone(), root_path: cli.path.clone(), lang_mode };
 
     let compiled_queries = Arc::new(build_compiled_queries(&config));
+
+    if cli.tui {
+        match crate::tui::run_tui(&config, &compiled_queries) {
+            Ok(_) => return,
+            Err(err) => {
+                eprintln!("error: {err}");
+                process::exit(1)
+            }
+        }
+    }
+
     let query_trigram_set = Arc::new(build_query_trigram_set(&config.queries));
     let index_path = index_path_for_root(config.root_path.as_path());
     let index_manifest = Arc::new(Mutex::new(match load_index(&index_path) {
@@ -750,6 +769,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -765,6 +785,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -787,6 +808,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -805,6 +827,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -970,6 +993,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(!cli.stats);
     }
@@ -985,8 +1009,42 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn test_tui_flag_defaults_false() {
+        let cli = Cli {
+            query: vec!["(function_item)".to_string()],
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: false,
+            stats: false,
+            no_update_index: false,
+            generate_completions: None,
+            tui: false,
+        };
+        assert!(!cli.tui);
+    }
+
+    #[test]
+    fn test_tui_flag_is_independent_of_quiet() {
+        let cli = Cli {
+            query: vec!["(function_item)".to_string()],
+            path: std::env::temp_dir(),
+            lang: "rust".to_string(),
+            no_color: false,
+            quiet: true,
+            stats: false,
+            no_update_index: false,
+            generate_completions: None,
+            tui: true,
+        };
+        assert!(cli.quiet);
+        assert!(cli.tui);
     }
 
     #[test]
@@ -1086,6 +1144,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(!cli.no_update_index);
     }
@@ -1140,6 +1199,7 @@ mod tests {
             stats: true,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -1155,6 +1215,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: Some(Shell::Bash),
+            tui: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -1170,6 +1231,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1187,6 +1249,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1209,6 +1272,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1228,6 +1292,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1251,6 +1316,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         assert!(cli.validate().is_err());
     }
@@ -1267,6 +1333,7 @@ mod tests {
                 stats: false,
                 no_update_index: false,
                 generate_completions: None,
+                tui: false,
             };
             assert!(cli.validate().is_ok(), "validate() rejected valid lang: {}", lang);
         }
@@ -1283,6 +1350,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1300,6 +1368,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1334,6 +1403,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let msg = cli.validate().unwrap_err();
         assert!(msg.contains('\n'));
@@ -1351,6 +1421,7 @@ mod tests {
             stats: false,
             no_update_index: false,
             generate_completions: None,
+            tui: false,
         };
         let msg = cli.validate().unwrap_err();
         assert!(msg.contains("fortran77"));

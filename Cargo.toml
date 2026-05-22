@@ -29,6 +29,12 @@ memmap2 = "0.9"
 bincode = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 
+ratatui    = "0.27"
+crossterm  = { version = "0.27", features = ["event-stream"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
