@@ -19,14 +19,33 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
+use tree_sitter::Tree;
 
 const SOURCE_CACHE_SIZE: usize = 10;
 const ASSUMED_PANE_HEIGHT: usize = 30;
+const MAX_AST_NODES: usize = 5000;
 
 pub(crate) enum PaneId {
     FileTree,
     CodeView,
     AstView,
+}
+
+#[derive(Clone)]
+pub(crate) struct AstNode {
+    pub(crate) id: usize,
+    pub(crate) depth: usize,
+    pub(crate) kind: String,
+    pub(crate) is_named: bool,
+    pub(crate) is_error: bool,
+    pub(crate) field_name: Option<String>,
+    pub(crate) start_line: usize,
+    pub(crate) start_col: usize,
+    pub(crate) end_line: usize,
+    pub(crate) end_col: usize,
+    pub(crate) text_preview: Option<String>,
+    pub(crate) has_children: bool,
+    pub(crate) parent_id: Option<usize>,
 }
 
 pub(crate) struct FileTreeEntry {
@@ -53,6 +72,10 @@ pub(crate) struct AppState {
     pub(crate) cached_source: HashMap<PathBuf, String>,
     pub(crate) auto_scrolled_for: Option<PathBuf>,
     pub(crate) active_pane: PaneId,
+    pub(crate) ast_nodes: Vec<AstNode>,
+    pub(crate) ast_selected_index: usize,
+    pub(crate) collapsed_node_ids: std::collections::HashSet<usize>,
+    pub(crate) ast_parsing_for: Option<PathBuf>,
 }
 
 impl AppState {
@@ -74,6 +97,10 @@ impl AppState {
             cached_source: HashMap::new(),
             auto_scrolled_for: None,
             active_pane: PaneId::FileTree,
+            ast_nodes: Vec::new(),
+            ast_selected_index: 0,
+            collapsed_node_ids: std::collections::HashSet::new(),
+            ast_parsing_for: None,
         }
     }
 
@@ -102,6 +129,11 @@ impl AppState {
         self.selected_file_index = 0;
         self.cached_source.clear();
         self.auto_scrolled_for = None;
+        self.ast_nodes.clear();
+        self.ast_selected_index = 0;
+        self.collapsed_node_ids.clear();
+        self.ast_scroll_offset = 0;
+        self.ast_parsing_for = None;
     }
 
     fn rebuild_file_tree(&mut self) {
@@ -184,6 +216,30 @@ impl AppState {
         self.auto_scrolled_for = Some(current_path);
     }
 
+    pub(crate) fn visible_ast_nodes(&self) -> Vec<&AstNode> {
+        let mut visible_nodes = Vec::new();
+        for node in &self.ast_nodes {
+            let mut current_parent = node.parent_id;
+            let mut hidden = false;
+            while let Some(parent_id) = current_parent {
+                if self.collapsed_node_ids.contains(&parent_id) {
+                    hidden = true;
+                    break;
+                }
+                current_parent =
+                    self.ast_nodes.get(parent_id).and_then(|ancestor| ancestor.parent_id);
+            }
+            if !hidden {
+                visible_nodes.push(node);
+            }
+        }
+        visible_nodes
+    }
+
+    pub(crate) fn selected_file_path(&self) -> Option<PathBuf> {
+        self.file_tree.get(self.selected_file_index).map(|entry| entry.path.clone())
+    }
+
     pub(crate) fn scroll_down(&mut self) {
         self.scroll_offset = self.scroll_offset.saturating_add(1);
     }
@@ -210,6 +266,111 @@ impl AppState {
     }
 }
 
+fn build_ast_nodes(tree: &Tree, source: &crate::parser::FileSource) -> Vec<AstNode> {
+    let mut nodes = Vec::new();
+    let mut cursor = tree.walk();
+    let mut ancestor_stack: Vec<usize> = Vec::new();
+    let mut needs_visit = true;
+
+    loop {
+        let current_id = nodes.len();
+        if needs_visit {
+            let node = cursor.node();
+            let start = node.start_position();
+            let end = node.end_position();
+            let has_children = node.child_count() > 0;
+            let text_preview = if has_children {
+                None
+            } else {
+                source
+                    .as_bytes()
+                    .get(node.byte_range())
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .map(|text| {
+                        let preview: String = text.chars().take(40).collect();
+                        if text.chars().count() > 40 {
+                            format!("{}…", preview)
+                        } else {
+                            preview
+                        }
+                    })
+            };
+            let ast_node = AstNode {
+                id: current_id,
+                depth: ancestor_stack.len(),
+                kind: node.kind().to_string(),
+                is_named: node.is_named(),
+                is_error: node.is_error() || node.kind() == "ERROR",
+                field_name: cursor.field_name().map(|s| s.to_string()),
+                start_line: start.row + 1,
+                start_col: start.column,
+                end_line: end.row + 1,
+                end_col: end.column,
+                text_preview,
+                has_children,
+                parent_id: ancestor_stack.last().copied(),
+            };
+            nodes.push(ast_node);
+            if nodes.len() >= MAX_AST_NODES {
+                return nodes;
+            }
+            needs_visit = false;
+        }
+
+        if needs_visit {
+            if cursor.goto_first_child() {
+                ancestor_stack.push(current_id);
+                needs_visit = true;
+                continue;
+            }
+        }
+
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return nodes;
+            }
+            ancestor_stack.pop();
+        }
+        needs_visit = true;
+    }
+}
+
+async fn spawn_ast_parse(
+    path: PathBuf,
+    lang: crate::types::Language,
+    event_tx: mpsc::UnboundedSender<AppEvent>,
+) {
+    let lang_name = match lang {
+        crate::types::Language::Rust => "rust",
+        crate::types::Language::Python => "python",
+        crate::types::Language::JavaScript => "js",
+        crate::types::Language::TypeScript => "ts",
+        crate::types::Language::Go => "go",
+        crate::types::Language::C => "c",
+        crate::types::Language::Cpp => "cpp",
+    };
+    let parsed = tokio::task::spawn_blocking(move || {
+        let ts_language = match crate::parser::get_language(lang_name) {
+            Ok(language) => language,
+            Err(_) => return Vec::new(),
+        };
+        match crate::parser::parse_file(&path, &ts_language) {
+            Ok((tree, source)) => {
+                let nodes = build_ast_nodes(&tree, &source);
+                drop(tree);
+                drop(source);
+                nodes
+            }
+            Err(_) => Vec::new(),
+        }
+    })
+    .await;
+
+    if let Ok(nodes) = parsed {
+        let _ = event_tx.send(AppEvent::AstReady(nodes));
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) enum AppEvent {
     Keystroke(KeyEvent),
@@ -217,6 +378,7 @@ pub(crate) enum AppEvent {
     Resize(u16, u16),
     SearchStarted,
     SearchResult(Vec<crate::types::MatchResult>),
+    AstReady(Vec<AstNode>),
     SearchComplete,
     SearchError(String),
 }
@@ -429,6 +591,25 @@ async fn run_tui_async(
                 if !state.should_quit {
                     state.load_source_for_selected();
                     state.auto_scroll_to_first_match();
+                    if let Some(selected_path) = state.selected_file_path() {
+                        if state.ast_parsing_for.as_ref() != Some(&selected_path) {
+                            state.ast_nodes.clear();
+                            state.ast_selected_index = 0;
+                            state.collapsed_node_ids.clear();
+                            state.ast_scroll_offset = 0;
+                            state.ast_parsing_for = Some(selected_path.clone());
+                            if let Some(lang) = crate::parser::detect_language(&selected_path) {
+                                let event_tx_ast = event_tx.clone();
+                                tokio::spawn(spawn_ast_parse(selected_path, lang, event_tx_ast));
+                            }
+                        }
+                    } else {
+                        state.ast_nodes.clear();
+                        state.ast_selected_index = 0;
+                        state.collapsed_node_ids.clear();
+                        state.ast_scroll_offset = 0;
+                        state.ast_parsing_for = None;
+                    }
                     render(&mut terminal, &state)?;
                     state.frame_count = state.frame_count.wrapping_add(1);
                 }
@@ -469,12 +650,34 @@ fn handle_event(
             KeyCode::Down | KeyCode::Char('j') => match state.active_pane {
                 PaneId::FileTree => state.select_next(),
                 PaneId::CodeView => state.scroll_down(),
-                PaneId::AstView => {}
+                PaneId::AstView => {
+                    let visible_len = state.visible_ast_nodes().len();
+                    if visible_len > 0 {
+                        if state.ast_selected_index + 1 < visible_len {
+                            state.ast_selected_index += 1;
+                        }
+                        let viewport = ASSUMED_PANE_HEIGHT.saturating_sub(2);
+                        if state.ast_selected_index >= state.ast_scroll_offset + viewport {
+                            state.ast_scroll_offset =
+                                state.ast_selected_index.saturating_sub(viewport.saturating_sub(1));
+                        }
+                    }
+                }
             },
             KeyCode::Up | KeyCode::Char('k') => match state.active_pane {
                 PaneId::FileTree => state.select_prev(),
                 PaneId::CodeView => state.scroll_up(),
-                PaneId::AstView => {}
+                PaneId::AstView => {
+                    let visible_len = state.visible_ast_nodes().len();
+                    if visible_len > 0 {
+                        if state.ast_selected_index > 0 {
+                            state.ast_selected_index -= 1;
+                        }
+                        if state.ast_selected_index < state.ast_scroll_offset + 2 {
+                            state.ast_scroll_offset = state.ast_selected_index.saturating_sub(1);
+                        }
+                    }
+                }
             },
             KeyCode::PageDown => {
                 for _ in 0..10 {
@@ -484,6 +687,32 @@ fn handle_event(
             KeyCode::PageUp => {
                 for _ in 0..10 {
                     state.scroll_up();
+                }
+            }
+            KeyCode::Char('g') if matches!(state.active_pane, PaneId::AstView) => {
+                state.ast_selected_index = 0;
+                state.ast_scroll_offset = 0;
+            }
+            KeyCode::Char('G') if matches!(state.active_pane, PaneId::AstView) => {
+                let visible_len = state.visible_ast_nodes().len();
+                if visible_len > 0 {
+                    state.ast_selected_index = visible_len.saturating_sub(1);
+                    if state.ast_selected_index > 0 {
+                        state.ast_scroll_offset = state.ast_selected_index.saturating_sub(1);
+                    }
+                }
+            }
+            KeyCode::Enter if matches!(state.active_pane, PaneId::AstView) => {
+                let visible_nodes = state.visible_ast_nodes();
+                if let Some(node) = visible_nodes.get(state.ast_selected_index) {
+                    if node.has_children {
+                        let node_id = node.id;
+                        if state.collapsed_node_ids.contains(&node_id) {
+                            state.collapsed_node_ids.remove(&node_id);
+                        } else {
+                            state.collapsed_node_ids.insert(node_id);
+                        }
+                    }
                 }
             }
             KeyCode::Char(c) => {
@@ -508,6 +737,12 @@ fn handle_event(
         },
         AppEvent::Tick => {}
         AppEvent::Resize(_, _) => {}
+        AppEvent::AstReady(nodes) => {
+            state.ast_nodes = nodes.to_vec();
+            state.ast_selected_index = 0;
+            state.collapsed_node_ids.clear();
+            state.ast_scroll_offset = 0;
+        }
         AppEvent::SearchResult(results) => state.append_results(results.clone()),
         AppEvent::SearchComplete => state.search_running = false,
         AppEvent::SearchError(msg) => {
@@ -755,14 +990,57 @@ fn draw_ast_pane(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         _ => Style::default(),
     };
     let block = Block::default().title(" AST ").borders(Borders::ALL).border_style(ast_border);
-    frame.render_widget(block, area);
+
+    if state.ast_nodes.is_empty() {
+        let text = if state.ast_parsing_for.is_some() { "Parsing…" } else { "Select a file" };
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let visible_nodes = state.visible_ast_nodes();
+    if visible_nodes.is_empty() {
+        let paragraph = Paragraph::new("No visible nodes")
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let max_scroll = visible_nodes.len().saturating_sub(inner_height);
+    let effective_scroll = state.ast_scroll_offset.min(max_scroll);
+    let end_index = (effective_scroll + inner_height).min(visible_nodes.len());
+    let selected_index = state.ast_selected_index.min(visible_nodes.len().saturating_sub(1));
+    let selected_path_matches = state.results_for_selected_file();
+    let mut lines = Vec::new();
+
+    for (visible_index, node) in visible_nodes[effective_scroll..end_index].iter().enumerate() {
+        let absolute_index = effective_scroll + visible_index;
+        let selected = absolute_index == selected_index;
+        let matched = node_matches_capture(node, selected_path_matches);
+        let collapsed = state.collapsed_node_ids.contains(&node.id);
+        lines.push(build_ast_node_line(
+            node,
+            selected,
+            matched,
+            collapsed,
+            area.width.saturating_sub(2) as usize,
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let hint_text = match state.active_pane {
         PaneId::FileTree => "  [↑↓/jk] select file   [Tab] focus code view  ",
         PaneId::CodeView => "  [↑↓/jk] scroll code   [Tab] focus file tree  ",
-        PaneId::AstView => "  [↑↓/jk] scroll ast    [Tab] focus code view  ",
+        PaneId::AstView => "  [↑↓/jk] navigate   [Enter] expand/collapse   [g/G] top/bottom  ",
     };
     let mut status = hint_text.to_string();
     if state.search_running {
@@ -772,6 +1050,111 @@ fn draw_status_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     }
     let paragraph = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(paragraph, area);
+}
+
+#[allow(dead_code)]
+fn build_highlighted_line(
+    line_text: &str,
+    highlight_range: Option<(usize, usize)>,
+) -> Vec<Span<'static>> {
+    let Some((start, end)) = highlight_range else {
+        return vec![Span::raw(line_text.to_string())];
+    };
+    if start >= end {
+        return vec![Span::raw(line_text.to_string())];
+    }
+    let before = line_text.get(..start);
+    let highlighted = line_text.get(start..end);
+    let after = line_text.get(end..);
+    match (before, highlighted, after) {
+        (Some(before), Some(highlighted), Some(after)) => vec![
+            Span::raw(before.to_string()),
+            Span::styled(
+                highlighted.to_string(),
+                Style::default().add_modifier(Modifier::REVERSED),
+            ),
+            Span::raw(after.to_string()),
+        ],
+        _ => vec![Span::raw(line_text.to_string())],
+    }
+}
+
+fn node_matches_capture(node: &AstNode, results: &[crate::types::MatchResult]) -> bool {
+    results
+        .iter()
+        .any(|result| result.start_line == node.start_line && result.start_col == node.start_col)
+}
+
+fn build_ast_node_line(
+    node: &AstNode,
+    selected: bool,
+    matched: bool,
+    collapsed: bool,
+    width: usize,
+) -> Line<'static> {
+    let selection_modifier = if selected { Modifier::REVERSED } else { Modifier::empty() };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut body_width = 0usize;
+    let mut push_text = |text: String, style: Style| {
+        body_width += text.chars().count();
+        spans.push(Span::styled(text, style.add_modifier(selection_modifier)));
+    };
+
+    push_text("  ".repeat(node.depth), Style::default());
+
+    let indicator = if node.has_children {
+        if collapsed {
+            "▶ "
+        } else {
+            "▼ "
+        }
+    } else {
+        "  "
+    };
+    let indicator_style = if node.has_children {
+        Style::default()
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    push_text(indicator.to_string(), indicator_style);
+
+    if let Some(field_name) = &node.field_name {
+        push_text(format!("{}: ", field_name), Style::default().add_modifier(Modifier::DIM));
+    }
+
+    let kind_style = if node.is_error {
+        Style::default().fg(Color::Red)
+    } else if node.is_named {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    push_text(node.kind.clone(), kind_style);
+
+    if matched {
+        push_text(" ●".to_string(), Style::default().fg(Color::Green));
+    }
+
+    if let Some(preview) = &node.text_preview {
+        push_text(
+            format!(" \"{}\"", preview),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+        );
+    }
+
+    let _multiline = node.start_line != node.end_line || node.start_col != node.end_col;
+    let position = format!("[{}:{}]", node.start_line, node.start_col);
+    let position_width = position.chars().count();
+    if body_width + position_width < width {
+        let padding = width - body_width - position_width;
+        spans.push(Span::raw(" ".repeat(padding)));
+        spans.push(Span::styled(
+            position,
+            Style::default().add_modifier(Modifier::DIM).add_modifier(selection_modifier),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 #[cfg(test)]
