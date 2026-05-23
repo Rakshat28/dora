@@ -296,6 +296,14 @@ impl MemoryDb {
         )
     }
 
+    pub fn find_symbols_by_name_contains(&self, needle: &str) -> Result<Vec<SymbolRow>> {
+        let pattern = format!("%{needle}%");
+        self.query_symbols(
+            "SELECT id, file_id, kind, name, start_line, start_col, end_line, end_col, signature FROM symbols WHERE name LIKE ?1 ORDER BY name ASC, file_id ASC",
+            params![pattern],
+        )
+    }
+
     pub fn find_symbols_by_kind(&self, kind: &SymbolKind) -> Result<Vec<SymbolRow>> {
         self.query_symbols(
             "SELECT id, file_id, kind, name, start_line, start_col, end_line, end_col, signature FROM symbols WHERE kind = ?1 ORDER BY name ASC, file_id ASC",
@@ -545,6 +553,18 @@ mod tests {
         db.insert_symbol(&make_symbol_row(file_id, SymbolKind::Function, "authorize", 2)).unwrap();
         db.insert_symbol(&make_symbol_row(file_id, SymbolKind::Function, "connect", 3)).unwrap();
         let symbols = db.find_symbols_by_name_prefix("auth").unwrap();
+        assert_eq!(symbols.len(), 2);
+    }
+
+    #[test]
+    fn test_find_symbols_by_name_contains() {
+        let db = make_db();
+        let file_id = insert_file(&db, "/tmp/a.rs", 100);
+        db.insert_symbol(&make_symbol_row(file_id, SymbolKind::Function, "authenticate", 1))
+            .unwrap();
+        db.insert_symbol(&make_symbol_row(file_id, SymbolKind::Function, "authorise", 2)).unwrap();
+        db.insert_symbol(&make_symbol_row(file_id, SymbolKind::Function, "connect", 3)).unwrap();
+        let symbols = db.find_symbols_by_name_contains("auth").unwrap();
         assert_eq!(symbols.len(), 2);
     }
 
