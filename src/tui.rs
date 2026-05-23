@@ -76,6 +76,12 @@ pub(crate) struct AppState {
     pub(crate) ast_selected_index: usize,
     pub(crate) collapsed_node_ids: std::collections::HashSet<usize>,
     pub(crate) ast_parsing_for: Option<PathBuf>,
+    pub(crate) terminal_width: u16,
+    pub(crate) terminal_height: u16,
+    pub(crate) force_redraw: bool,
+    pub(crate) file_tree_pct: u16,
+    pub(crate) code_view_pct: u16,
+    pub(crate) ast_view_pct: u16,
 }
 
 impl AppState {
@@ -101,7 +107,37 @@ impl AppState {
             ast_selected_index: 0,
             collapsed_node_ids: std::collections::HashSet::new(),
             ast_parsing_for: None,
+            terminal_width: 0,
+            terminal_height: 0,
+            force_redraw: false,
+            file_tree_pct: 25,
+            code_view_pct: 50,
+            ast_view_pct: 25,
         }
+    }
+
+    pub(crate) fn adjust_pane_size(&mut self, delta: i16) {
+        if delta == 0 {
+            return;
+        }
+        let active_idx = match self.active_pane {
+            PaneId::FileTree => 0usize,
+            PaneId::CodeView => 1usize,
+            PaneId::AstView => 2usize,
+        };
+        let right_idx = (active_idx + 1) % 3;
+        let mut pcts = [self.file_tree_pct as i16, self.code_view_pct as i16, self.ast_view_pct as i16];
+        let adj = delta;
+        let new_active = pcts[active_idx].saturating_add(adj);
+        let new_right = pcts[right_idx].saturating_sub(adj);
+        if new_active < 10 || new_active > 80 || new_right < 10 || new_right > 80 {
+            return;
+        }
+        pcts[active_idx] = new_active;
+        pcts[right_idx] = new_right;
+        self.file_tree_pct = pcts[0] as u16;
+        self.code_view_pct = pcts[1] as u16;
+        self.ast_view_pct = pcts[2] as u16;
     }
 
     pub(crate) fn append_results(&mut self, mut new_results: Vec<crate::types::MatchResult>) {
@@ -433,6 +469,10 @@ async fn run_tui_async(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AppEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
     let mut state = AppState::new();
+    if let Ok((w, h)) = crossterm::terminal::size() {
+        state.terminal_width = w;
+        state.terminal_height = h;
+    }
     let mut key_stream = EventStream::new();
     let event_tx_clone = event_tx.clone();
     tokio::spawn(async move {
@@ -610,7 +650,7 @@ async fn run_tui_async(
                         state.ast_scroll_offset = 0;
                         state.ast_parsing_for = None;
                     }
-                    render(&mut terminal, &state)?;
+                    render(&mut terminal, &mut state)?;
                     state.frame_count = state.frame_count.wrapping_add(1);
                 }
                 if state.should_quit {
@@ -716,10 +756,16 @@ fn handle_event(
                 }
             }
             KeyCode::Char(c) => {
-                state.query_input.push(c);
-                state.error_message = None;
-                state.debounce_deadline =
-                    Some(tokio::time::Instant::now() + Duration::from_millis(300));
+                if c == '<' {
+                    state.adjust_pane_size(-5);
+                } else if c == '>' {
+                    state.adjust_pane_size(5);
+                } else {
+                    state.query_input.push(c);
+                    state.error_message = None;
+                    state.debounce_deadline =
+                        Some(tokio::time::Instant::now() + Duration::from_millis(300));
+                }
             }
             KeyCode::Backspace => {
                 state.query_input.pop();
@@ -736,7 +782,11 @@ fn handle_event(
             _ => {}
         },
         AppEvent::Tick => {}
-        AppEvent::Resize(_, _) => {}
+        AppEvent::Resize(w, h) => {
+            state.terminal_width = *w;
+            state.terminal_height = *h;
+            state.force_redraw = true;
+        }
         AppEvent::AstReady(nodes) => {
             state.ast_nodes = nodes.to_vec();
             state.ast_selected_index = 0;
@@ -758,16 +808,33 @@ fn handle_event(
 
 fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    state: &AppState,
+    state: &mut AppState,
 ) -> crate::types::Result<()> {
+    if state.force_redraw {
+        terminal.clear()?;
+        state.force_redraw = false;
+    }
     terminal.draw(|frame| {
         draw_ui(frame, state);
     })?;
     Ok(())
 }
 
+fn is_terminal_too_small(width: u16, height: u16) -> bool {
+    width < 40 || height < 10
+}
+
 fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
     let area = frame.size();
+    if is_terminal_too_small(area.width, area.height) {
+        let block = Block::default().borders(Borders::ALL).title("Terminal");
+        let paragraph = Paragraph::new("Terminal too small — resize to continue")
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().fg(Color::Red));
+        frame.render_widget(paragraph, area);
+        return;
+    }
     let layout = Layout::default().direction(Direction::Vertical).constraints([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -778,9 +845,9 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
     draw_query_bar(frame, query_area, state);
 
     let panes_layout = Layout::default().direction(Direction::Horizontal).constraints([
-        Constraint::Percentage(25),
-        Constraint::Percentage(50),
-        Constraint::Percentage(25),
+        Constraint::Percentage(state.file_tree_pct),
+        Constraint::Percentage(state.code_view_pct),
+        Constraint::Percentage(state.ast_view_pct),
     ]);
     let [file_pane_area, code_pane_area, ast_pane_area] = panes_layout.areas(panes_area);
 
@@ -1679,5 +1746,238 @@ mod tests {
         let end_col = 2;
         let match_segment = &line_text[start_col..end_col];
         assert_eq!(match_segment, "fn");
+    }
+
+    #[test]
+    fn test_submit_query_updates_submitted_query() {
+        let mut s = AppState::new();
+        s.query_input = "fn greet".to_string();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Enter));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert_eq!(s.submitted_query, Some("fn greet".to_string()));
+    }
+
+    #[test]
+    fn test_search_result_event_updates_results() {
+        let mut s = AppState::new();
+        let a = crate::types::MatchResult { file_path: PathBuf::from("a"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "x".to_string() };
+        let b = crate::types::MatchResult { file_path: PathBuf::from("b"), start_line:2, start_col:0, end_line:2, end_col:1, capture_name: "c".to_string(), matched_text: "y".to_string() };
+        handle_event(&mut s, &AppEvent::SearchResult(vec![a.clone(), b.clone()]), &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert_eq!(s.results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_complete_clears_running_flag() {
+        let mut s = AppState::new();
+        s.search_running = true;
+        handle_event(&mut s, &AppEvent::SearchComplete, &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert!(!s.search_running);
+    }
+
+    #[test]
+    fn test_search_started_clears_results_and_sets_running() {
+        let mut s = AppState::new();
+        s.results.push(crate::types::MatchResult { file_path: PathBuf::from("x"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "m".to_string() });
+        handle_event(&mut s, &AppEvent::SearchStarted, &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert!(s.results.is_empty());
+        assert!(s.search_running);
+    }
+
+    #[test]
+    fn test_search_error_sets_error_message() {
+        let mut s = AppState::new();
+        handle_event(&mut s, &AppEvent::SearchError("parse failed".to_string()), &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert_eq!(s.error_message, Some("parse failed".to_string()));
+        assert!(!s.search_running);
+    }
+
+    #[test]
+    fn test_selecting_result_updates_index() {
+        let mut s = AppState::new();
+        s.file_tree = vec![
+            FileTreeEntry { path: PathBuf::from("a"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("b"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("c"), match_count: 1 },
+        ];
+        s.selected_file_index = 0;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Down));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert_eq!(s.selected_file_index, 1);
+    }
+
+    #[test]
+    fn test_j_key_same_as_down_in_file_tree() {
+        let mut s = AppState::new();
+        s.file_tree = vec![
+            FileTreeEntry { path: PathBuf::from("a"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("b"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("c"), match_count: 1 },
+        ];
+        s.selected_file_index = 0;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Char('j')));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert_eq!(s.selected_file_index, 1);
+    }
+
+    #[test]
+    fn test_k_key_moves_selection_up() {
+        let mut s = AppState::new();
+        s.file_tree = vec![
+            FileTreeEntry { path: PathBuf::from("a"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("b"), match_count: 1 },
+            FileTreeEntry { path: PathBuf::from("c"), match_count: 1 },
+        ];
+        s.selected_file_index = 2;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Char('k')));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert_eq!(s.selected_file_index, 1);
+    }
+
+    #[test]
+    fn test_quit_sets_should_quit() {
+        let mut s = AppState::new();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Char('q')));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert!(s.should_quit);
+    }
+
+    #[test]
+    fn test_esc_sets_should_quit() {
+        let mut s = AppState::new();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        let ev = AppEvent::Keystroke(KeyEvent::from(KeyCode::Esc));
+        handle_event(&mut s, &ev, &cmd_tx);
+        assert!(s.should_quit);
+    }
+
+    #[test]
+    fn test_resize_updates_terminal_dimensions() {
+        let mut s = AppState::new();
+        s.terminal_width = 80;
+        s.terminal_height = 24;
+        handle_event(&mut s, &AppEvent::Resize(120, 40), &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert_eq!(s.terminal_width, 120);
+        assert_eq!(s.terminal_height, 40);
+    }
+
+    #[test]
+    fn test_resize_sets_force_redraw() {
+        let mut s = AppState::new();
+        s.force_redraw = false;
+        handle_event(&mut s, &AppEvent::Resize(100, 30), &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert!(s.force_redraw);
+    }
+
+    #[test]
+    fn test_tab_cycles_panes() {
+        let mut s = AppState::new();
+        s.active_pane = PaneId::FileTree;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Tab)), &cmd_tx);
+        assert!(matches!(s.active_pane, PaneId::CodeView));
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Tab)), &cmd_tx);
+        assert!(matches!(s.active_pane, PaneId::AstView));
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Tab)), &cmd_tx);
+        assert!(matches!(s.active_pane, PaneId::FileTree));
+    }
+
+    #[test]
+    fn test_char_appended_to_query_input() {
+        let mut s = AppState::new();
+        s.query_input = "fn".to_string();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Char(' '))), &cmd_tx);
+        assert_eq!(s.query_input, "fn ".to_string());
+    }
+
+    #[test]
+    fn test_backspace_removes_last_char() {
+        let mut s = AppState::new();
+        s.query_input = "fn ".to_string();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Backspace)), &cmd_tx);
+        assert_eq!(s.query_input, "fn".to_string());
+    }
+
+    #[test]
+    fn test_backspace_on_empty_query_does_not_panic() {
+        let mut s = AppState::new();
+        s.query_input = "".to_string();
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Backspace)), &cmd_tx);
+        assert_eq!(s.query_input, "".to_string());
+    }
+
+    #[test]
+    fn test_char_keystroke_clears_error_message() {
+        let mut s = AppState::new();
+        s.error_message = Some("previous error".to_string());
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Char('x'))), &cmd_tx);
+        assert!(s.error_message.is_none());
+    }
+
+    #[test]
+    fn test_ast_ready_populates_ast_nodes() {
+        let mut s = AppState::new();
+        let node = AstNode { id: 0, depth: 0, kind: "source_file".to_string(), is_named: true, is_error: false, field_name: None, start_line: 1, start_col: 0, end_line: 1, end_col: 0, text_preview: None, has_children: false, parent_id: None };
+        handle_event(&mut s, &AppEvent::AstReady(vec![node.clone()]), &mpsc::unbounded_channel::<SearchCommand>().0);
+        assert_eq!(s.ast_nodes.len(), 1);
+        assert_eq!(s.ast_selected_index, 0);
+        assert!(s.collapsed_node_ids.is_empty());
+    }
+
+    #[test]
+    fn test_enter_in_ast_pane_toggles_collapse() {
+        let mut s = AppState::new();
+        s.active_pane = PaneId::AstView;
+        let node = AstNode { id: 0, depth: 0, kind: "n".to_string(), is_named: true, is_error: false, field_name: None, start_line: 1, start_col: 0, end_line: 1, end_col: 0, text_preview: None, has_children: true, parent_id: None };
+        s.ast_nodes.push(node);
+        s.ast_selected_index = 0;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Enter)), &cmd_tx);
+        assert!(s.collapsed_node_ids.contains(&0));
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Enter)), &cmd_tx);
+        assert!(!s.collapsed_node_ids.contains(&0));
+    }
+
+    #[test]
+    fn test_debounce_deadline_set_on_char_in_filetree_pane() {
+        let mut s = AppState::new();
+        s.active_pane = PaneId::FileTree;
+        s.debounce_deadline = None;
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
+        handle_event(&mut s, &AppEvent::Keystroke(KeyEvent::from(KeyCode::Char('f'))), &cmd_tx);
+        assert!(s.debounce_deadline.is_some());
+    }
+
+    #[test]
+    fn test_pane_resize_grow_shrinks_neighbor() {
+        let mut s = AppState::new();
+        s.file_tree_pct = 25; s.code_view_pct = 50; s.ast_view_pct = 25;
+        s.active_pane = PaneId::FileTree;
+        s.adjust_pane_size(5);
+        assert_eq!(s.file_tree_pct, 30);
+        assert_eq!(s.file_tree_pct + s.code_view_pct + s.ast_view_pct, 100);
+    }
+
+    #[test]
+    fn test_pane_resize_respects_minimum() {
+        let mut s = AppState::new();
+        s.file_tree_pct = 10;
+        s.active_pane = PaneId::FileTree;
+        s.adjust_pane_size(-5);
+        assert_eq!(s.file_tree_pct, 10);
+    }
+
+    #[test]
+    fn test_minimum_terminal_guard_condition() {
+        assert!(is_terminal_too_small(39, 10));
+        assert!(!is_terminal_too_small(40, 10));
     }
 }
