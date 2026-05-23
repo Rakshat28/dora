@@ -268,6 +268,8 @@ pub fn extract_multi_matches(
                     start_col: start.column,
                     end_line: end.row + 1,
                     end_col: end.column,
+                    start_byte: byte_range.start,
+                    end_byte: byte_range.end,
                 });
             }
         }

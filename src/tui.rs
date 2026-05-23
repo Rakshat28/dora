@@ -126,7 +126,8 @@ impl AppState {
             PaneId::AstView => 2usize,
         };
         let right_idx = (active_idx + 1) % 3;
-        let mut pcts = [self.file_tree_pct as i16, self.code_view_pct as i16, self.ast_view_pct as i16];
+        let mut pcts =
+            [self.file_tree_pct as i16, self.code_view_pct as i16, self.ast_view_pct as i16];
         let adj = delta;
         let new_active = pcts[active_idx].saturating_add(adj);
         let new_right = pcts[right_idx].saturating_sub(adj);
@@ -1249,6 +1250,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "x".to_string(),
         };
@@ -1258,6 +1261,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "y".to_string(),
         };
@@ -1267,6 +1272,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "z".to_string(),
         };
@@ -1286,6 +1293,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 2,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "m".to_string(),
         };
@@ -1345,6 +1354,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1354,6 +1365,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "u".to_string(),
         };
@@ -1363,6 +1376,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "v".to_string(),
         };
@@ -1372,6 +1387,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "u".to_string(),
         };
@@ -1390,6 +1407,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1399,6 +1418,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1453,6 +1474,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "m".to_string(),
         };
@@ -1485,6 +1508,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "x".to_string(),
         };
@@ -1494,6 +1519,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "y".to_string(),
         };
@@ -1503,6 +1530,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "z".to_string(),
         };
@@ -1640,6 +1669,8 @@ mod tests {
             start_col: 0,
             end_line: 50,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "test".to_string(),
             matched_text: "fn".to_string(),
         });
@@ -1660,6 +1691,8 @@ mod tests {
             start_col: 0,
             end_line: 50,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "test".to_string(),
             matched_text: "fn".to_string(),
         });
@@ -1761,9 +1794,33 @@ mod tests {
     #[test]
     fn test_search_result_event_updates_results() {
         let mut s = AppState::new();
-        let a = crate::types::MatchResult { file_path: PathBuf::from("a"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "x".to_string() };
-        let b = crate::types::MatchResult { file_path: PathBuf::from("b"), start_line:2, start_col:0, end_line:2, end_col:1, capture_name: "c".to_string(), matched_text: "y".to_string() };
-        handle_event(&mut s, &AppEvent::SearchResult(vec![a.clone(), b.clone()]), &mpsc::unbounded_channel::<SearchCommand>().0);
+        let a = crate::types::MatchResult {
+            file_path: PathBuf::from("a"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
+            capture_name: "c".to_string(),
+            matched_text: "x".to_string(),
+        };
+        let b = crate::types::MatchResult {
+            file_path: PathBuf::from("b"),
+            start_line: 2,
+            start_col: 0,
+            end_line: 2,
+            end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
+            capture_name: "c".to_string(),
+            matched_text: "y".to_string(),
+        };
+        handle_event(
+            &mut s,
+            &AppEvent::SearchResult(vec![a.clone(), b.clone()]),
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert_eq!(s.results.len(), 2);
     }
 
@@ -1771,15 +1828,33 @@ mod tests {
     fn test_search_complete_clears_running_flag() {
         let mut s = AppState::new();
         s.search_running = true;
-        handle_event(&mut s, &AppEvent::SearchComplete, &mpsc::unbounded_channel::<SearchCommand>().0);
+        handle_event(
+            &mut s,
+            &AppEvent::SearchComplete,
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert!(!s.search_running);
     }
 
     #[test]
     fn test_search_started_clears_results_and_sets_running() {
         let mut s = AppState::new();
-        s.results.push(crate::types::MatchResult { file_path: PathBuf::from("x"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "m".to_string() });
-        handle_event(&mut s, &AppEvent::SearchStarted, &mpsc::unbounded_channel::<SearchCommand>().0);
+        s.results.push(crate::types::MatchResult {
+            file_path: PathBuf::from("x"),
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
+            capture_name: "c".to_string(),
+            matched_text: "m".to_string(),
+        });
+        handle_event(
+            &mut s,
+            &AppEvent::SearchStarted,
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert!(s.results.is_empty());
         assert!(s.search_running);
     }
@@ -1787,7 +1862,11 @@ mod tests {
     #[test]
     fn test_search_error_sets_error_message() {
         let mut s = AppState::new();
-        handle_event(&mut s, &AppEvent::SearchError("parse failed".to_string()), &mpsc::unbounded_channel::<SearchCommand>().0);
+        handle_event(
+            &mut s,
+            &AppEvent::SearchError("parse failed".to_string()),
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert_eq!(s.error_message, Some("parse failed".to_string()));
         assert!(!s.search_running);
     }
@@ -1860,7 +1939,11 @@ mod tests {
         let mut s = AppState::new();
         s.terminal_width = 80;
         s.terminal_height = 24;
-        handle_event(&mut s, &AppEvent::Resize(120, 40), &mpsc::unbounded_channel::<SearchCommand>().0);
+        handle_event(
+            &mut s,
+            &AppEvent::Resize(120, 40),
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert_eq!(s.terminal_width, 120);
         assert_eq!(s.terminal_height, 40);
     }
@@ -1869,7 +1952,11 @@ mod tests {
     fn test_resize_sets_force_redraw() {
         let mut s = AppState::new();
         s.force_redraw = false;
-        handle_event(&mut s, &AppEvent::Resize(100, 30), &mpsc::unbounded_channel::<SearchCommand>().0);
+        handle_event(
+            &mut s,
+            &AppEvent::Resize(100, 30),
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert!(s.force_redraw);
     }
 
@@ -1925,8 +2012,26 @@ mod tests {
     #[test]
     fn test_ast_ready_populates_ast_nodes() {
         let mut s = AppState::new();
-        let node = AstNode { id: 0, depth: 0, kind: "source_file".to_string(), is_named: true, is_error: false, field_name: None, start_line: 1, start_col: 0, end_line: 1, end_col: 0, text_preview: None, has_children: false, parent_id: None };
-        handle_event(&mut s, &AppEvent::AstReady(vec![node.clone()]), &mpsc::unbounded_channel::<SearchCommand>().0);
+        let node = AstNode {
+            id: 0,
+            depth: 0,
+            kind: "source_file".to_string(),
+            is_named: true,
+            is_error: false,
+            field_name: None,
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 0,
+            text_preview: None,
+            has_children: false,
+            parent_id: None,
+        };
+        handle_event(
+            &mut s,
+            &AppEvent::AstReady(vec![node.clone()]),
+            &mpsc::unbounded_channel::<SearchCommand>().0,
+        );
         assert_eq!(s.ast_nodes.len(), 1);
         assert_eq!(s.ast_selected_index, 0);
         assert!(s.collapsed_node_ids.is_empty());
@@ -1936,7 +2041,21 @@ mod tests {
     fn test_enter_in_ast_pane_toggles_collapse() {
         let mut s = AppState::new();
         s.active_pane = PaneId::AstView;
-        let node = AstNode { id: 0, depth: 0, kind: "n".to_string(), is_named: true, is_error: false, field_name: None, start_line: 1, start_col: 0, end_line: 1, end_col: 0, text_preview: None, has_children: true, parent_id: None };
+        let node = AstNode {
+            id: 0,
+            depth: 0,
+            kind: "n".to_string(),
+            is_named: true,
+            is_error: false,
+            field_name: None,
+            start_line: 1,
+            start_col: 0,
+            end_line: 1,
+            end_col: 0,
+            text_preview: None,
+            has_children: true,
+            parent_id: None,
+        };
         s.ast_nodes.push(node);
         s.ast_selected_index = 0;
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel::<SearchCommand>();
@@ -1959,7 +2078,9 @@ mod tests {
     #[test]
     fn test_pane_resize_grow_shrinks_neighbor() {
         let mut s = AppState::new();
-        s.file_tree_pct = 25; s.code_view_pct = 50; s.ast_view_pct = 25;
+        s.file_tree_pct = 25;
+        s.code_view_pct = 50;
+        s.ast_view_pct = 25;
         s.active_pane = PaneId::FileTree;
         s.adjust_pane_size(5);
         assert_eq!(s.file_tree_pct, 30);

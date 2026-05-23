@@ -45,6 +45,7 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures")
 }
 
+#[allow(dead_code)]
 fn run_pipeline_for_language(
     fixture_dir: &Path,
     query_str: &str,
@@ -186,7 +187,10 @@ fn test_empty_file_produces_no_results() {
 #[test]
 fn test_eq_predicate_filters_to_exact_match() {
     let query = r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "beta"))"#;
-    let results = run_pipeline(&fixtures_dir(), query);
+    let results = run_pipeline(&fixtures_dir(), query)
+        .into_iter()
+        .filter(|r| r.file_path == fixtures_dir().join("multi_fn.rs"))
+        .collect::<Vec<_>>();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].matched_text, "beta");
@@ -198,7 +202,10 @@ fn test_eq_predicate_filters_to_exact_match() {
 fn test_match_predicate_regex_filter() {
     let query =
         r#"(function_item name: (identifier) @fn_name (#match? @fn_name "^(alpha|gamma)$"))"#;
-    let results = run_pipeline(&fixtures_dir(), query);
+    let results = run_pipeline(&fixtures_dir(), query)
+        .into_iter()
+        .filter(|r| r.file_path == fixtures_dir().join("multi_fn.rs"))
+        .collect::<Vec<_>>();
 
     let texts: HashSet<_> = results.iter().map(|r| r.matched_text.as_str()).collect();
     assert_eq!(texts, HashSet::from(["alpha", "gamma"]));
@@ -407,6 +414,50 @@ fn test_python_function_name_capture() {
     assert!(names.contains("greet"));
     assert!(names.contains("add"));
     assert!(names.contains("multiply"));
+}
+
+#[test]
+fn test_rewrite_dry_run_produces_diff() {
+    use dora::rewrite::RewriteTemplate;
+    use dora::rewrite::{apply_edits_to_files, compute_edits, generate_diff};
+    let fixture = fixtures_dir().join("simple.rs");
+    let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
+    let results = run_pipeline(&fixtures_dir(), query);
+    let tmpl = RewriteTemplate { raw: "renamed_add".to_string() };
+    let edits = compute_edits(&results, &tmpl);
+    assert!(!edits.is_empty());
+    let map = apply_edits_to_files(&edits);
+    let entry = map.get(&fixture).expect("fixture should have result");
+    match entry {
+        Ok(rewritten) => {
+            assert!(rewritten.contains("renamed_add"));
+            let original = std::fs::read_to_string(&fixture).unwrap();
+            let diff = generate_diff(&original, rewritten, &fixture);
+            assert!(diff.contains("renamed_add"));
+        }
+        Err(e) => panic!("rewrite error: {}", e),
+    }
+}
+
+#[test]
+fn test_rewrite_preserves_surrounding_text() {
+    use dora::rewrite::RewriteTemplate;
+    use dora::rewrite::{apply_edits_to_files, compute_edits};
+    let fixture = fixtures_dir().join("simple.rs");
+    let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
+    let results = run_pipeline(&fixtures_dir(), query);
+    let tmpl = RewriteTemplate { raw: "compute".to_string() };
+    let edits = compute_edits(&results, &tmpl);
+    let map = apply_edits_to_files(&edits);
+    let rewritten =
+        map.get(&fixture).expect("fixture must be present").as_ref().expect("rewrite ok");
+    let original = std::fs::read_to_string(&fixture).unwrap();
+    assert!(rewritten.contains("compute"));
+    for line in original.lines() {
+        if !line.contains("fn add") {
+            assert!(rewritten.contains(line));
+        }
+    }
 }
 
 #[test]
@@ -2006,4 +2057,218 @@ fn test_go_struct_selective_extraction() {
     for result in &filtered {
         assert!(result.matched_text.ends_with("Config"));
     }
+}
+
+fn rust_matches(fixture: &Path, query_str: &str) -> Vec<MatchResult> {
+    use dora::parser::{get_language, parse_file};
+    use dora::query::{compile_query, extract_matches};
+
+    let lang = get_language("rust").unwrap();
+    let query = compile_query(&lang, query_str).unwrap();
+    let (tree, source) = parse_file(fixture, &lang).unwrap();
+    let mut results = extract_matches(&tree, &source, &query, fixture);
+    drop(tree);
+    drop(source);
+    results.sort();
+    results.dedup();
+    results
+}
+
+fn assert_diff_eq(expected: &str, actual: &str, path: &Path) {
+    if expected != actual {
+        panic!("rewrite output differs:\n{}", dora::rewrite::generate_diff(expected, actual, path));
+    }
+}
+
+#[test]
+fn test_rewrite_fixture_alpha_at_file_start() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "alpha"))"#,
+    );
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].start_byte, 3);
+
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "first_function".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+    let source = std::fs::read_to_string(&fixture).unwrap();
+
+    assert!(rewritten.starts_with("fn first_function"));
+    assert_eq!(&source[results[0].end_byte..], &rewritten["fn ".len() + "first_function".len()..]);
+}
+
+#[test]
+fn test_rewrite_fixture_omega_at_file_end() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "omega"))"#,
+    );
+
+    assert_eq!(results.len(), 1);
+
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "last_fn".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+    let source = std::fs::read_to_string(&fixture).unwrap();
+
+    let mut expected = source;
+    expected.replace_range(results[0].start_byte..results[0].end_byte, "last_fn");
+    assert_diff_eq(&expected, rewritten, &fixture);
+    assert!(rewritten.ends_with("fn last_fn() {}"));
+    assert!(!rewritten.ends_with('\n'));
+}
+
+#[test]
+fn test_rewrite_fixture_gamma_multiline() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name body: (block) @body (#eq? @fn_name "gamma"))"#,
+    );
+
+    let body = results.iter().find(|r| r.capture_name == "body").unwrap();
+    assert_ne!(body.start_line, body.end_line);
+
+    let body_result = body.clone();
+    let edits = dora::rewrite::compute_edits(
+        &[body_result],
+        &dora::rewrite::RewriteTemplate { raw: "{\n    let changed = true;\n}".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+    let source = std::fs::read_to_string(&fixture).unwrap();
+
+    assert_eq!(&source[..body.start_byte], &rewritten[..body.start_byte]);
+    let replacement_len = "{\n    let changed = true;\n}".len();
+    let rewritten_suffix_start = body.start_byte + replacement_len;
+    assert_eq!(&source[body.end_byte..], &rewritten[rewritten_suffix_start..]);
+}
+
+#[test]
+fn test_rewrite_preserves_non_targeted_functions() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "beta"))"#,
+    );
+
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "delta".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+
+    assert!(rewritten.contains("fn alpha"));
+    assert!(rewritten.contains("fn gamma"));
+    assert!(rewritten.contains("fn omega"));
+    assert!(rewritten.contains("fn delta"));
+    assert!(!rewritten.contains("fn beta"));
+}
+
+#[test]
+fn test_rewrite_unicode_fixture_byte_offsets() {
+    let fixture = fixtures_dir().join("rewrite_unicode.rs");
+    let source = std::fs::read_to_string(&fixture).unwrap();
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "after_unicode"))"#,
+    );
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].start_byte, source.find("after_unicode").unwrap());
+    assert!(results[0].start_byte > source.find("🌍").unwrap());
+
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "post_unicode".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+
+    assert!(rewritten.contains("grüßen"));
+    assert!(rewritten.contains("Hello 🌍"));
+    assert!(rewritten.contains("fn post_unicode() {}"));
+    assert!(!rewritten.contains("fn after_unicode() {}"));
+}
+
+#[test]
+fn test_rewrite_multi_file_independence() {
+    let rewrite_fixture = fixtures_dir().join("rewrite_simple.rs");
+    let simple_fixture = fixtures_dir().join("simple.rs");
+
+    let mut results = rust_matches(
+        &rewrite_fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "alpha"))"#,
+    );
+    results.extend(rust_matches(
+        &simple_fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
+    ));
+
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "renamed_@fn_name".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+
+    let rewrite_simple = rewritten.get(&rewrite_fixture).unwrap().as_ref().unwrap();
+    let simple = rewritten.get(&simple_fixture).unwrap().as_ref().unwrap();
+
+    assert!(rewrite_simple.contains("renamed_alpha"));
+    assert!(simple.contains("renamed_add"));
+    assert_ne!(rewrite_simple, simple);
+}
+
+#[test]
+fn test_rewrite_exact_byte_output_matches_expected() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "alpha"))"#,
+    );
+
+    let source = std::fs::read_to_string(&fixture).unwrap();
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "REPLACED".to_string() },
+    );
+    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
+
+    let mut expected = source.clone();
+    expected.replace_range(results[0].start_byte..results[0].end_byte, "REPLACED");
+    if rewritten != &expected {
+        panic!(
+            "rewrite output differs from expected:\n{}",
+            dora::rewrite::generate_diff(&expected, rewritten, &fixture)
+        );
+    }
+}
+
+#[test]
+fn test_rewrite_dry_run_does_not_modify_fixture() {
+    let fixture = fixtures_dir().join("rewrite_simple.rs");
+    let before = std::fs::read_to_string(&fixture).unwrap();
+    let results = rust_matches(
+        &fixture,
+        r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "alpha"))"#,
+    );
+    let edits = dora::rewrite::compute_edits(
+        &results,
+        &dora::rewrite::RewriteTemplate { raw: "dry_run".to_string() },
+    );
+    let _ = dora::rewrite::apply_edits_to_files(&edits);
+    let after = std::fs::read_to_string(&fixture).unwrap();
+    assert_eq!(before, after);
 }

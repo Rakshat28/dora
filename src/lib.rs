@@ -7,6 +7,7 @@ pub mod indexer;
 pub mod output;
 pub mod parser;
 pub mod query;
+pub mod rewrite;
 pub mod sieve;
 pub mod trigram;
 pub mod tui;
