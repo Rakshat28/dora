@@ -16,6 +16,7 @@ use rayon::prelude::*;
 
 mod bloom;
 mod index;
+mod mcp;
 #[allow(dead_code)]
 mod memory;
 mod output;
@@ -29,6 +30,7 @@ pub mod walker;
 
 use bloom::BloomFilter;
 use index::{index_path_for_root, load_index, save_index, IndexEntry, IndexManifest};
+use mcp::{run as run_mcp, McpConfig};
 use memory::{memory_db_path, FileRow, MemoryDb, SymbolKind, SymbolRow};
 use output::{print_lookup_results, print_match, print_summary, resolve_color_mode, ColorMode};
 use parser::{detect_language, get_all_languages, parse_file_with_metadata};
@@ -90,6 +92,9 @@ fn handle_file_error(error: &FileError, skip_count: &Mutex<usize>) {
 struct App {
     #[command(flatten)]
     cli: Cli,
+
+    #[arg(long = "mcp", default_value_t = false, help = "Run the MCP server over stdio")]
+    mcp: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -250,11 +255,19 @@ struct SearchOutcome {
 
 impl Cli {
     fn validate(&self) -> std::result::Result<(), String> {
+        self.validate_internal(false)
+    }
+
+    fn validate_allowing_empty_query(&self) -> std::result::Result<(), String> {
+        self.validate_internal(true)
+    }
+
+    fn validate_internal(&self, allow_empty_query: bool) -> std::result::Result<(), String> {
         if self.generate_completions.is_some() {
             return Ok(());
         }
 
-        if self.query.iter().all(|q| q.trim().is_empty()) {
+        if !allow_empty_query && self.query.iter().all(|q| q.trim().is_empty()) {
             return Err("at least one query string must not be empty".to_string());
         }
 
@@ -484,6 +497,13 @@ fn run_lookup_mode(args: &LookupArgs) {
 
     let mut stdout = std::io::stdout().lock();
     print_lookup_results(&results, &color, &mut stdout);
+}
+
+fn resolve_root_path(path: &Path) -> PathBuf {
+    match fs::canonicalize(path) {
+        Ok(resolved) => resolved,
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 fn resolve_lang(lang_str: &str) -> Language {
@@ -847,6 +867,26 @@ fn main() {
 
     if let Some(Commands::Lookup(args)) = &app.command {
         run_lookup_mode(args);
+        return;
+    }
+
+    if app.mcp {
+        if let Err(message) = cli.validate_allowing_empty_query() {
+            eprintln!("error: {message}");
+            process::exit(1);
+        }
+
+        let root_path = resolve_root_path(&cli.path);
+        let mcp_config = McpConfig {
+            root_path: root_path.clone(),
+            db_path: memory_db_path(&root_path),
+            lang_mode: resolve_lang_mode(&cli.lang),
+        };
+
+        if let Err(error) = run_mcp(mcp_config) {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
         return;
     }
 

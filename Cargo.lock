@@ -383,6 +383,7 @@ dependencies = [
  "rusqlite",
  "scopeguard",
  "serde",
+ "serde_json",
  "similar",
  "tempfile",
  "thiserror",
