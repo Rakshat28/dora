@@ -693,7 +693,13 @@ fn main() {
     }
 }
 
-fn run_rewrite_mode(results: Vec<MatchResult>, template: &str, in_place: bool, yes: bool, color: &ColorMode) {
+fn run_rewrite_mode(
+    results: Vec<MatchResult>,
+    template: &str,
+    in_place: bool,
+    yes: bool,
+    color: &ColorMode,
+) {
     use std::io::{self, BufRead};
 
     let rewrite_results: Vec<dora::types::MatchResult> = results
@@ -756,7 +762,10 @@ fn run_rewrite_mode(results: Vec<MatchResult>, template: &str, in_place: bool, y
         .filter(|result| result.as_ref().map(|text| !text.is_empty()).unwrap_or(false))
         .count();
     let captures_rewritten = edits.len();
-    eprintln!("{} files would be modified, {} captures would be rewritten", files_changed, captures_rewritten);
+    eprintln!(
+        "{} files would be modified, {} captures would be rewritten",
+        files_changed, captures_rewritten
+    );
 
     if in_place {
         eprintln!("Files with changes:");
