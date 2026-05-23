@@ -164,6 +164,29 @@ struct Cli {
         help = "Generate shell completion script for the specified shell"
     )]
     generate_completions: Option<Shell>,
+
+    #[arg(
+        long = "rewrite",
+        value_name = "TEMPLATE",
+        help = "Rewrite matched captures using this template. @capture_name is substituted."
+    )]
+    rewrite: Option<String>,
+
+    #[arg(
+        long = "in-place",
+        default_value_t = false,
+        requires = "rewrite",
+        help = "Apply rewrites to files in place. Requires --rewrite."
+    )]
+    in_place: bool,
+
+    #[arg(
+        long = "yes",
+        default_value_t = false,
+        requires = "in_place",
+        help = "Skip confirmation prompt when using --in-place."
+    )]
+    yes: bool,
 }
 
 struct SearchOutcome {
@@ -198,6 +221,12 @@ impl Cli {
                 "path is not a directory: {}\n  hint: --path must point to a directory, not a file",
                 self.path.display()
             ));
+        }
+
+        if let Some(t) = &self.rewrite {
+            if t.trim().is_empty() {
+                return Err("rewrite template must not be empty".to_string());
+            }
         }
 
         let supported = ["rust", "python", "js", "ts", "go", "c", "cpp", "auto"];
@@ -632,6 +661,11 @@ fn main() {
     }
 
     let stdout = std::io::stdout();
+    if let Some(tmpl) = &cli.rewrite {
+        run_rewrite_mode(outcome.results, tmpl, cli.in_place, cli.yes, &color);
+        return;
+    }
+
     if !cli.quiet {
         for result in &outcome.results {
             print_match(result, &color, &mut stdout.lock());
@@ -656,6 +690,122 @@ fn main() {
 
     if cli.stats {
         print_stats(&outcome, started_at.elapsed());
+    }
+}
+
+fn run_rewrite_mode(results: Vec<MatchResult>, template: &str, in_place: bool, yes: bool, color: &ColorMode) {
+    use std::io::{self, BufRead};
+
+    let rewrite_results: Vec<dora::types::MatchResult> = results
+        .into_iter()
+        .map(|result| dora::types::MatchResult {
+            file_path: result.file_path,
+            start_line: result.start_line,
+            start_col: result.start_col,
+            end_line: result.end_line,
+            end_col: result.end_col,
+            start_byte: result.start_byte,
+            end_byte: result.end_byte,
+            capture_name: result.capture_name,
+            matched_text: result.matched_text,
+        })
+        .collect();
+
+    let tmpl = dora::rewrite::RewriteTemplate { raw: template.to_string() };
+    let edits = dora::rewrite::compute_edits(&rewrite_results, &tmpl);
+    if edits.is_empty() {
+        eprintln!("No changes would be made.");
+        return;
+    }
+
+    let all: HashMap<_, _> = dora::rewrite::apply_edits_to_files(&edits);
+
+    for (path, result) in &all {
+        match result {
+            Ok(rewritten) => match std::fs::read_to_string(path) {
+                Ok(original) => {
+                    let diff = dora::rewrite::generate_diff(&original, rewritten, path);
+                    if diff.is_empty() {
+                        continue;
+                    }
+
+                    if let ColorMode::On = color {
+                        for line in diff.lines() {
+                            if line.starts_with('+') {
+                                eprintln!("\x1b[32m{}\x1b[0m", line);
+                            } else if line.starts_with('-') {
+                                eprintln!("\x1b[31m{}\x1b[0m", line);
+                            } else if line.starts_with('@') {
+                                eprintln!("\x1b[36m{}\x1b[0m", line);
+                            } else {
+                                eprintln!("{}", line);
+                            }
+                        }
+                    } else {
+                        println!("{}", diff);
+                    }
+                }
+                Err(error) => eprintln!("error: {}: {}", path.display(), error),
+            },
+            Err(message) => eprintln!("error: {}: {}", path.display(), message),
+        }
+    }
+
+    let files_changed = all
+        .values()
+        .filter(|result| result.as_ref().map(|text| !text.is_empty()).unwrap_or(false))
+        .count();
+    let captures_rewritten = edits.len();
+    eprintln!("{} files would be modified, {} captures would be rewritten", files_changed, captures_rewritten);
+
+    if in_place {
+        eprintln!("Files with changes:");
+        for (path, result) in &all {
+            if result.is_ok() {
+                eprintln!("  {}", path.display());
+            }
+        }
+
+        let mut apply = yes;
+        if !yes {
+            eprint!("Apply these changes? [y/N] ");
+            let stdin = io::stdin();
+            let mut line = String::new();
+            if stdin.lock().read_line(&mut line).is_ok() {
+                let answer = line.trim();
+                if answer == "y" || answer == "Y" {
+                    apply = true;
+                }
+            }
+        }
+
+        if !apply {
+            eprintln!("Aborted.");
+            return;
+        }
+
+        let mut rewritten_count = 0usize;
+        let mut error_count = 0usize;
+        for (path, result) in &all {
+            match result {
+                Ok(content) => match dora::rewrite::write_atomically(path, content) {
+                    Ok(()) => {
+                        eprintln!("  rewritten: {}", path.display());
+                        rewritten_count += 1;
+                    }
+                    Err(error) => {
+                        eprintln!("  error: {}: {}", path.display(), error);
+                        error_count += 1;
+                    }
+                },
+                Err(message) => {
+                    eprintln!("  error: {}: {}", path.display(), message);
+                    error_count += 1;
+                }
+            }
+        }
+
+        eprintln!("{} files rewritten, {} errors", rewritten_count, error_count);
     }
 }
 
@@ -770,6 +920,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -786,6 +939,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -809,6 +965,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -828,6 +987,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -885,6 +1047,8 @@ mod tests {
             start_col: 0,
             end_line: 5,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "txt".to_string(),
         });
@@ -894,6 +1058,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "txt".to_string(),
         });
@@ -903,6 +1069,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "txt".to_string(),
         });
@@ -912,6 +1080,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "txt".to_string(),
         });
@@ -921,6 +1091,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "txt".to_string(),
         });
@@ -949,6 +1121,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "x".to_string(),
             matched_text: "x".to_string(),
         });
@@ -958,6 +1132,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "a".to_string(),
             matched_text: "a".to_string(),
         });
@@ -967,6 +1143,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "a".to_string(),
             matched_text: "a".to_string(),
         });
@@ -994,6 +1172,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(!cli.stats);
     }
@@ -1010,6 +1191,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(!cli.quiet);
     }
@@ -1026,6 +1210,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(!cli.tui);
     }
@@ -1042,6 +1229,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: true,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(cli.quiet);
         assert!(cli.tui);
@@ -1145,6 +1335,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(!cli.no_update_index);
     }
@@ -1160,6 +1353,8 @@ mod tests {
                 start_col: 0,
                 end_line: 1,
                 end_col: 3,
+                start_byte: 0,
+                end_byte: 0,
                 capture_name: "fn".to_string(),
                 matched_text: "foo".to_string(),
             },
@@ -1169,6 +1364,8 @@ mod tests {
                 start_col: 0,
                 end_line: 5,
                 end_col: 3,
+                start_byte: 0,
+                end_byte: 0,
                 capture_name: "fn".to_string(),
                 matched_text: "bar".to_string(),
             },
@@ -1178,6 +1375,8 @@ mod tests {
                 start_col: 0,
                 end_line: 1,
                 end_col: 3,
+                start_byte: 0,
+                end_byte: 0,
                 capture_name: "fn".to_string(),
                 matched_text: "baz".to_string(),
             },
@@ -1200,6 +1399,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -1216,6 +1418,9 @@ mod tests {
             no_update_index: false,
             generate_completions: Some(Shell::Bash),
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(cli.validate().is_ok());
     }
@@ -1232,6 +1437,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1250,6 +1458,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1273,6 +1484,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1293,6 +1507,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1317,6 +1534,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         assert!(cli.validate().is_err());
     }
@@ -1334,6 +1554,9 @@ mod tests {
                 no_update_index: false,
                 generate_completions: None,
                 tui: false,
+                rewrite: None,
+                in_place: false,
+                yes: false,
             };
             assert!(cli.validate().is_ok(), "validate() rejected valid lang: {}", lang);
         }
@@ -1351,6 +1574,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1369,6 +1595,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let result = cli.validate();
         assert!(result.is_err());
@@ -1404,6 +1633,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let msg = cli.validate().unwrap_err();
         assert!(msg.contains('\n'));
@@ -1422,6 +1654,9 @@ mod tests {
             no_update_index: false,
             generate_completions: None,
             tui: false,
+            rewrite: None,
+            in_place: false,
+            yes: false,
         };
         let msg = cli.validate().unwrap_err();
         assert!(msg.contains("fortran77"));

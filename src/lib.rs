@@ -12,3 +12,4 @@ pub mod trigram;
 pub mod tui;
 pub mod types;
 pub mod walker;
+pub mod rewrite;

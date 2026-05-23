@@ -410,6 +410,49 @@ fn test_python_function_name_capture() {
 }
 
 #[test]
+fn test_rewrite_dry_run_produces_diff() {
+    use dora::rewrite::RewriteTemplate;
+    use dora::rewrite::{compute_edits, apply_edits_to_files, generate_diff};
+    let fixture = fixtures_dir().join("simple.rs");
+    let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
+    let results = run_pipeline(&fixtures_dir(), query);
+    let tmpl = RewriteTemplate { raw: "renamed_add".to_string() };
+    let edits = compute_edits(&results, &tmpl);
+    assert!(!edits.is_empty());
+    let map = apply_edits_to_files(&edits);
+    let entry = map.get(&fixture).expect("fixture should have result");
+    match entry {
+        Ok(rewritten) => {
+            assert!(rewritten.contains("renamed_add"));
+            let original = std::fs::read_to_string(&fixture).unwrap();
+            let diff = generate_diff(&original, rewritten, &fixture);
+            assert!(diff.contains("-add") || diff.contains("+renamed_add"));
+        }
+        Err(e) => panic!("rewrite error: {}", e),
+    }
+}
+
+#[test]
+fn test_rewrite_preserves_surrounding_text() {
+    use dora::rewrite::RewriteTemplate;
+    use dora::rewrite::{compute_edits, apply_edits_to_files};
+    let fixture = fixtures_dir().join("simple.rs");
+    let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
+    let results = run_pipeline(&fixtures_dir(), query);
+    let tmpl = RewriteTemplate { raw: "compute".to_string() };
+    let edits = compute_edits(&results, &tmpl);
+    let map = apply_edits_to_files(&edits);
+    let rewritten = map.get(&fixture).expect("fixture must be present").as_ref().expect("rewrite ok");
+    let original = std::fs::read_to_string(&fixture).unwrap();
+    assert!(rewritten.contains("compute"));
+    for line in original.lines() {
+        if !line.contains("fn add") {
+            assert!(rewritten.contains(line));
+        }
+    }
+}
+
+#[test]
 fn test_python_function_line_numbers() {
     use dora::parser::{get_language, parse_file};
     use dora::query::{compile_query, extract_matches};

@@ -212,6 +212,8 @@ mod tests {
             start_col: 4,
             end_line: 42,
             end_col: 16,
+            start_byte: 0,
+            end_byte: 0,
         }
     }
 
@@ -307,6 +309,8 @@ mod tests {
             start_col: 4,
             end_line: 10,
             end_col: 9,
+            start_byte: 0,
+            end_byte: 0,
         };
 
         let out = format_match(&r, &ColorMode::Off);
@@ -323,6 +327,8 @@ mod tests {
             start_col: 4,
             end_line: 10,
             end_col: 9,
+            start_byte: 0,
+            end_byte: 0,
         };
 
         let out = format_match(&r, &ColorMode::On);
@@ -347,6 +353,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
         };
 
         let out = format_match(&r, &ColorMode::Off);
@@ -458,6 +466,8 @@ mod tests {
             start_col: 3,
             end_line: 1,
             end_col: 8,
+            start_byte: 0,
+            end_byte: 0,
         };
         let result2 = MatchResult {
             file_path: PathBuf::from("src/b.rs"),
@@ -467,6 +477,8 @@ mod tests {
             start_col: 3,
             end_line: 5,
             end_col: 7,
+            start_byte: 0,
+            end_byte: 0,
         };
         let mut buf: Vec<u8> = Vec::new();
         print_match(&result1, &ColorMode::Off, &mut buf);
@@ -492,6 +504,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 0,
+            start_byte: 0,
+            end_byte: 0,
         };
         let mut buf: Vec<u8> = Vec::new();
         print_match(&result, &ColorMode::Off, &mut buf);
@@ -593,6 +607,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
         };
         let mut buf: Vec<u8> = Vec::new();
         print_match(&result, &ColorMode::Off, &mut buf);

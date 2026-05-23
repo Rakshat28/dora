@@ -27,6 +27,8 @@ pub struct MatchResult {
     pub start_col: usize,
     pub end_line: usize,
     pub end_col: usize,
+    pub start_byte: usize,
+    pub end_byte: usize,
     pub capture_name: String,
     pub matched_text: String,
 }
@@ -81,6 +83,8 @@ mod tests {
             start_col: 3,
             end_line: 0,
             end_col: 7,
+            start_byte: 0,
+            end_byte: 0,
         };
         let b = a.clone();
         assert_eq!(a, b);
@@ -162,6 +166,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "e".to_string(),
             matched_text: "e".to_string(),
         };
@@ -171,6 +177,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "b".to_string(),
             matched_text: "b".to_string(),
         };
@@ -180,6 +188,8 @@ mod tests {
             start_col: 3,
             end_line: 2,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "d".to_string(),
             matched_text: "d".to_string(),
         };
@@ -189,6 +199,8 @@ mod tests {
             start_col: 5,
             end_line: 10,
             end_col: 8,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "a".to_string(),
             matched_text: "a".to_string(),
         };
@@ -198,6 +210,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "c".to_string(),
         };
@@ -234,6 +248,8 @@ mod tests {
             start_col: 2,
             end_line: 5,
             end_col: 4,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "aaa".to_string(),
             matched_text: "bar".to_string(),
         };
@@ -243,6 +259,8 @@ mod tests {
             start_col: 2,
             end_line: 5,
             end_col: 8,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "zzz".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -262,6 +280,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "fn_name".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -272,6 +292,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "fn_name".to_string(),
             matched_text: "bar".to_string(),
         };
@@ -293,6 +315,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap_one".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -302,6 +326,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap_two".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -321,6 +347,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -330,6 +358,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "bar".to_string(),
         };
@@ -358,6 +388,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "cap".to_string(),
             matched_text: "foo".to_string(),
         };
@@ -378,6 +410,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "a".to_string(),
             matched_text: "a".to_string(),
         };
@@ -387,6 +421,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "b".to_string(),
             matched_text: "b".to_string(),
         };
@@ -396,6 +432,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 3,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "c".to_string(),
         };
@@ -420,6 +458,8 @@ mod tests {
                 start_col: 0,
                 end_line: line,
                 end_col: 3,
+                start_byte: 0,
+                end_byte: 0,
                 capture_name: "cap".to_string(),
                 matched_text: "txt".to_string(),
             });
@@ -444,6 +484,8 @@ mod tests {
                 start_col: col,
                 end_line: 5,
                 end_col: col + 3,
+                start_byte: 0,
+                end_byte: 0,
                 capture_name: "cap".to_string(),
                 matched_text: "txt".to_string(),
             });

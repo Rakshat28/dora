@@ -1249,6 +1249,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "x".to_string(),
         };
@@ -1258,6 +1260,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "y".to_string(),
         };
@@ -1267,6 +1271,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "z".to_string(),
         };
@@ -1286,6 +1292,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 2,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "m".to_string(),
         };
@@ -1345,6 +1353,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1354,6 +1364,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "u".to_string(),
         };
@@ -1363,6 +1375,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "v".to_string(),
         };
@@ -1372,6 +1386,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "u".to_string(),
         };
@@ -1390,6 +1406,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1399,6 +1417,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "t".to_string(),
         };
@@ -1453,6 +1473,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "m".to_string(),
         };
@@ -1485,6 +1507,8 @@ mod tests {
             start_col: 0,
             end_line: 1,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "x".to_string(),
         };
@@ -1494,6 +1518,8 @@ mod tests {
             start_col: 0,
             end_line: 2,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "y".to_string(),
         };
@@ -1503,6 +1529,8 @@ mod tests {
             start_col: 0,
             end_line: 3,
             end_col: 1,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "c".to_string(),
             matched_text: "z".to_string(),
         };
@@ -1640,6 +1668,8 @@ mod tests {
             start_col: 0,
             end_line: 50,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "test".to_string(),
             matched_text: "fn".to_string(),
         });
@@ -1660,6 +1690,8 @@ mod tests {
             start_col: 0,
             end_line: 50,
             end_col: 5,
+            start_byte: 0,
+            end_byte: 0,
             capture_name: "test".to_string(),
             matched_text: "fn".to_string(),
         });
@@ -1761,8 +1793,8 @@ mod tests {
     #[test]
     fn test_search_result_event_updates_results() {
         let mut s = AppState::new();
-        let a = crate::types::MatchResult { file_path: PathBuf::from("a"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "x".to_string() };
-        let b = crate::types::MatchResult { file_path: PathBuf::from("b"), start_line:2, start_col:0, end_line:2, end_col:1, capture_name: "c".to_string(), matched_text: "y".to_string() };
+        let a = crate::types::MatchResult { file_path: PathBuf::from("a"), start_line:1, start_col:0, end_line:1, end_col:1, start_byte: 0, end_byte: 0, capture_name: "c".to_string(), matched_text: "x".to_string() };
+        let b = crate::types::MatchResult { file_path: PathBuf::from("b"), start_line:2, start_col:0, end_line:2, end_col:1, start_byte: 0, end_byte: 0, capture_name: "c".to_string(), matched_text: "y".to_string() };
         handle_event(&mut s, &AppEvent::SearchResult(vec![a.clone(), b.clone()]), &mpsc::unbounded_channel::<SearchCommand>().0);
         assert_eq!(s.results.len(), 2);
     }
@@ -1778,7 +1810,7 @@ mod tests {
     #[test]
     fn test_search_started_clears_results_and_sets_running() {
         let mut s = AppState::new();
-        s.results.push(crate::types::MatchResult { file_path: PathBuf::from("x"), start_line:1, start_col:0, end_line:1, end_col:1, capture_name: "c".to_string(), matched_text: "m".to_string() });
+        s.results.push(crate::types::MatchResult { file_path: PathBuf::from("x"), start_line:1, start_col:0, end_line:1, end_col:1, start_byte: 0, end_byte: 0, capture_name: "c".to_string(), matched_text: "m".to_string() });
         handle_event(&mut s, &AppEvent::SearchStarted, &mpsc::unbounded_channel::<SearchCommand>().0);
         assert!(s.results.is_empty());
         assert!(s.search_running);
