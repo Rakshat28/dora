@@ -8,7 +8,9 @@
 [![languages](https://img.shields.io/badge/languages-7-purple?style=flat-square)](#supported-languages)
 [![platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey?style=flat-square)](#installation)
 
-`doora` is a high-performance structural code search engine built on Tree-sitter. It parses source files into `Abstract Syntax` Trees and executes pattern queries against them — finding functions, types, call sites, and structural relationships that text search tools are fundamentally incapable of locating. Unlike grep, which cannot tell the difference between a function named authenticate and a comment that mentions authenticate, `doora` understands your code's grammar. Additionally, `doora` serves as a persistent "Codebase Memory" for AI coding agents. By exposing its structural index via the Model Context Protocol (`MCP`), `LLM`s can execute precise, graph-native queries directly against your codebase, retrieving exact function signatures and dependency relationships without overwhelming their context windows with raw source text.
+`doora` is a high-performance structural code search engine built on Tree-sitter. It parses source files into `Abstract Syntax Trees` and executes pattern queries against them — finding functions, types, call sites, and structural relationships that text search tools are fundamentally incapable of locating. Unlike grep, which cannot tell the difference between a function named authenticate and a comment that mentions authenticate, `doora` understands your code's grammar. 
+
+Additionally, `doora` serves as a persistent "Codebase Memory" for AI coding agents. By exposing its structural index via the Model Context Protocol (`MCP`), `LLM`s can execute precise, graph-native queries directly against your codebase, retrieving exact function signatures and dependency relationships without overwhelming their context windows with raw source text.
 
 ---
 
