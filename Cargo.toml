@@ -2,9 +2,29 @@
 name = "doora"
 version = "0.1.0"
 edition = "2021"
+description = "Doora parses source files into syntax trees and runs S-expression queries to find functions, types, and call sites that grep misses. Supports Rust, Python, JS, TS, Go, C, and C++. Exposes an MCP server so AI agents understand your codebase semantically, cutting hallucinations and wasted context tokens."
+authors = ["backpack-lab"]
+license = "MIT"
+repository = "https://github.com/backpack-lab/doora"
+homepage = "https://github.com/backpack-lab/doora"
+keywords = ["rust", "cli", "tree-sitter", "mcp", "ast", "code-search", "developer-tools", "query-engine", "rayon", "llm", "ai-coding", "grep-alternative", "structural-search"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
+exclude = [
+	"tests/fixtures/",
+	"benches/",
+	"scripts/",
+	"docs/",
+	".github/",
+]
 
 [profile.release]
 debug = 1
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [[bin]]
 name = "doora"
@@ -46,3 +66,18 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "search_benchmarks"
 harness = false
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.22.0"
+ci = ["github"]
+installers = ["shell", "powershell"]
+targets = [
+	"x86_64-unknown-linux-gnu",
+	"aarch64-unknown-linux-gnu",
+	"x86_64-apple-darwin",
+	"aarch64-apple-darwin",
+	"x86_64-pc-windows-msvc",
+]
+install-path = "CARGO_HOME"
+publish-jobs = ["cargo"]
+
