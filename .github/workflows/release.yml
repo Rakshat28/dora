@@ -37,14 +37,27 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
+      - name: Install cross
+        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        run: cargo install cross --locked
       - name: Add target
+        shell: bash
         run: |
           rustup target add ${{ matrix.target }} || true
       - name: Build release
+        shell: bash
         run: |
-          cargo build --release --target ${{ matrix.target }}
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)
+            cross build --release --target ${{ matrix.target }}
+              ;;
+            *)
+            cargo build --release --target ${{ matrix.target }}
+              ;;
+          esac
       - name: Archive artifact
         if: ${{ matrix.archive == 'tar.gz' }}
+        shell: bash
         run: |
           ART="doora-${{ matrix.target }}"
           mkdir -p dist
@@ -52,6 +65,7 @@ jobs:
           tar -czf dist/${ART}.tar.gz -C dist ${ART}
       - name: Zip artifact
         if: ${{ matrix.archive == 'zip' }}
+        shell: bash
         run: |
           ART="doora-${{ matrix.target }}"
           mkdir -p dist
