@@ -145,6 +145,8 @@ doora --generate-completions fish > ~/.config/fish/completions/doora.fish
 
 ## Quick Start
 
+**Looking for how to write queries?** Check out our detailed [Query Guide](QUERY_GUIDE.md).
+
 ```bash
 # Find all Rust function definitions in ./src
 doora -q '(function_item name: (identifier) @fn_name)' -p ./src
