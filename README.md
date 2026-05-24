@@ -1190,4 +1190,4 @@ All three must pass cleanly. The CI pipeline enforces `#![deny(warnings)]` and `
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Apache — see [LICENSE](./LICENSE).
