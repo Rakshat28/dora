@@ -1,10 +1,10 @@
-use dora::extractor::SymbolExtractor;
-use dora::memory::{MemoryDb, NewFileRow, NewSymbolRow, SymbolKind};
-use dora::output::{print_lookup_results, ColorMode};
-use dora::parser::{get_language, parse_file};
-use dora::query::{compile_query, extract_matches};
-use dora::types::{Language, MatchResult};
-use dora::walker::build_walker;
+use doora::extractor::SymbolExtractor;
+use doora::memory::{MemoryDb, NewFileRow, NewSymbolRow, SymbolKind};
+use doora::output::{print_lookup_results, ColorMode};
+use doora::parser::{get_language, parse_file};
+use doora::query::{compile_query, extract_matches};
+use doora::types::{Language, MatchResult};
+use doora::walker::build_walker;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -352,7 +352,7 @@ fn test_invalid_query_compile_error() {
     let result = compile_query(&ts_lang, "((( invalid");
 
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), dora::types::AppError::QueryCompileError(_)));
+    assert!(matches!(result.unwrap_err(), doora::types::AppError::QueryCompileError(_)));
 }
 
 #[test]
@@ -432,8 +432,8 @@ fn validate_inputs(query: &str, path: &str, lang: &str) -> Result<(), String> {
 
 #[test]
 fn test_python_function_name_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -456,8 +456,8 @@ fn test_python_function_name_capture() {
 
 #[test]
 fn test_rewrite_dry_run_produces_diff() {
-    use dora::rewrite::RewriteTemplate;
-    use dora::rewrite::{apply_edits_to_files, compute_edits, generate_diff};
+    use doora::rewrite::RewriteTemplate;
+    use doora::rewrite::{apply_edits_to_files, compute_edits, generate_diff};
     let fixture = fixtures_dir().join("simple.rs");
     let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
     let results = run_pipeline(&fixtures_dir(), query);
@@ -479,8 +479,8 @@ fn test_rewrite_dry_run_produces_diff() {
 
 #[test]
 fn test_rewrite_preserves_surrounding_text() {
-    use dora::rewrite::RewriteTemplate;
-    use dora::rewrite::{apply_edits_to_files, compute_edits};
+    use doora::rewrite::RewriteTemplate;
+    use doora::rewrite::{apply_edits_to_files, compute_edits};
     let fixture = fixtures_dir().join("simple.rs");
     let query = "(function_item name: (identifier) @fn_name (#eq? @fn_name \"add\"))";
     let results = run_pipeline(&fixtures_dir(), query);
@@ -500,8 +500,8 @@ fn test_rewrite_preserves_surrounding_text() {
 
 #[test]
 fn test_python_function_line_numbers() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -535,8 +535,8 @@ fn test_python_function_line_numbers() {
 
 #[test]
 fn test_python_walker_finds_py_files() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -561,8 +561,8 @@ fn test_python_walker_finds_py_files() {
 
 #[test]
 fn test_python_walker_includes_pyi_stubs() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -584,8 +584,8 @@ fn test_python_walker_includes_pyi_stubs() {
 
 #[test]
 fn test_python_eq_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.py");
     let lang = get_language("python").unwrap();
@@ -607,8 +607,8 @@ fn test_python_eq_predicate() {
 
 #[test]
 fn test_rust_and_python_results_do_not_mix() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let rust_fixture = fixtures_dir().join("simple.rs");
     let python_fixture = fixtures_dir().join("simple.py");
@@ -654,8 +654,8 @@ fn test_rust_and_python_results_do_not_mix() {
 
 #[test]
 fn test_javascript_function_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -676,8 +676,8 @@ fn test_javascript_function_declaration_capture() {
 
 #[test]
 fn test_javascript_class_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -697,8 +697,8 @@ fn test_javascript_class_declaration_capture() {
 
 #[test]
 fn test_javascript_function_name_exact_position() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.js");
     let lang = get_language("js").unwrap();
@@ -722,8 +722,8 @@ fn test_javascript_function_name_exact_position() {
 
 #[test]
 fn test_typescript_function_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -745,8 +745,8 @@ fn test_typescript_function_declaration_capture() {
 
 #[test]
 fn test_typescript_interface_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -768,8 +768,8 @@ fn test_typescript_interface_declaration_capture() {
 
 #[test]
 fn test_typescript_type_alias_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -790,8 +790,8 @@ fn test_typescript_type_alias_capture() {
 
 #[test]
 fn test_typescript_class_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.ts");
     let lang = get_language("ts").unwrap();
@@ -812,8 +812,8 @@ fn test_typescript_class_declaration_capture() {
 
 #[test]
 fn test_javascript_walker_extensions() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -842,8 +842,8 @@ fn test_javascript_walker_extensions() {
 
 #[test]
 fn test_typescript_walker_extensions() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -874,8 +874,8 @@ fn test_typescript_walker_extensions() {
 
 #[test]
 fn test_js_and_ts_results_do_not_mix() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let js_fixture = fixtures_dir().join("simple.js");
     let ts_fixture = fixtures_dir().join("simple.ts");
@@ -917,8 +917,8 @@ fn test_js_and_ts_results_do_not_mix() {
 
 #[test]
 fn test_typescript_interface_query_compiles() {
-    use dora::parser::get_language;
-    use dora::query::compile_query;
+    use doora::parser::get_language;
+    use doora::query::compile_query;
 
     let lang = get_language("ts").unwrap();
     let result = compile_query(&lang, "(interface_declaration name: (type_identifier) @name)");
@@ -927,8 +927,8 @@ fn test_typescript_interface_query_compiles() {
 
 #[test]
 fn test_js_grammar_rejects_typescript_node_type() {
-    use dora::parser::get_language;
-    use dora::query::compile_query;
+    use doora::parser::get_language;
+    use doora::query::compile_query;
 
     let js_lang = get_language("js").unwrap();
     let result = compile_query(&js_lang, "(interface_declaration name: (type_identifier) @name)");
@@ -940,8 +940,8 @@ fn test_js_grammar_rejects_typescript_node_type() {
 
 #[test]
 fn test_go_function_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -963,8 +963,8 @@ fn test_go_function_declaration_capture() {
 
 #[test]
 fn test_go_function_exact_positions() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -995,8 +995,8 @@ fn test_go_function_exact_positions() {
 
 #[test]
 fn test_go_struct_type_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -1021,8 +1021,8 @@ fn test_go_struct_type_declaration_capture() {
 
 #[test]
 fn test_go_eq_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -1044,8 +1044,8 @@ fn test_go_eq_predicate() {
 
 #[test]
 fn test_go_match_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.go");
     let lang = get_language("go").unwrap();
@@ -1070,8 +1070,8 @@ fn test_go_match_predicate() {
 
 #[test]
 fn test_go_walker_finds_go_files_only() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1100,8 +1100,8 @@ fn test_go_walker_finds_go_files_only() {
 
 #[test]
 fn test_go_and_rust_results_do_not_mix() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let go_fixture = fixtures_dir().join("simple.go");
     let rust_fixture = fixtures_dir().join("simple.rs");
@@ -1136,8 +1136,8 @@ fn test_go_and_rust_results_do_not_mix() {
 
 #[test]
 fn test_go_grammar_rejects_rust_node_type() {
-    use dora::parser::get_language;
-    use dora::query::compile_query;
+    use doora::parser::get_language;
+    use doora::query::compile_query;
 
     let go_lang = get_language("go").unwrap();
     let result = compile_query(&go_lang, "(function_item name: (identifier) @fn_name)");
@@ -1149,8 +1149,8 @@ fn test_go_grammar_rejects_rust_node_type() {
 
 #[test]
 fn test_all_five_languages_compile_queries() {
-    use dora::parser::get_language;
-    use dora::query::compile_query;
+    use doora::parser::get_language;
+    use doora::query::compile_query;
 
     let cases = vec![
         ("rust", "(function_item name: (identifier) @fn_name)"),
@@ -1169,7 +1169,7 @@ fn test_all_five_languages_compile_queries() {
 
 #[test]
 fn test_all_five_languages_parse_minimal_source() {
-    use dora::parser::{get_language, parse_file};
+    use doora::parser::{get_language, parse_file};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -1202,8 +1202,8 @@ fn test_all_five_languages_parse_minimal_source() {
 
 #[test]
 fn test_c_function_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1228,8 +1228,8 @@ fn test_c_function_declaration_capture() {
 
 #[test]
 fn test_c_function_exact_positions() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1264,8 +1264,8 @@ fn test_c_function_exact_positions() {
 
 #[test]
 fn test_c_typedef_name_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1286,8 +1286,8 @@ fn test_c_typedef_name_capture() {
 
 #[test]
 fn test_cpp_class_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1321,8 +1321,8 @@ fn test_cpp_class_declaration_capture() {
 
 #[test]
 fn test_cpp_struct_declaration_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1343,8 +1343,8 @@ fn test_cpp_struct_declaration_capture() {
 
 #[test]
 fn test_cpp_free_function_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1368,8 +1368,8 @@ fn test_cpp_free_function_capture() {
 
 #[test]
 fn test_c_walker_extensions() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1398,8 +1398,8 @@ fn test_c_walker_extensions() {
 
 #[test]
 fn test_cpp_walker_extensions() {
-    use dora::types::Language;
-    use dora::walker::build_walker;
+    use doora::types::Language;
+    use doora::walker::build_walker;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1434,8 +1434,8 @@ fn test_cpp_walker_extensions() {
 
 #[test]
 fn test_c_eq_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.c");
     let lang = get_language("c").unwrap();
@@ -1460,8 +1460,8 @@ fn test_c_eq_predicate() {
 
 #[test]
 fn test_cpp_eq_predicate_class() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("simple.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1483,8 +1483,8 @@ fn test_cpp_eq_predicate_class() {
 
 #[test]
 fn test_all_seven_languages_compile_queries() {
-    use dora::parser::get_language;
-    use dora::query::compile_query;
+    use doora::parser::get_language;
+    use doora::query::compile_query;
 
     let cases = vec![
         ("rust",   "(function_item name: (identifier) @fn_name)"),
@@ -1505,7 +1505,7 @@ fn test_all_seven_languages_compile_queries() {
 
 #[test]
 fn test_all_seven_languages_parse_minimal_source() {
-    use dora::parser::{get_language, parse_file};
+    use doora::parser::{get_language, parse_file};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -1540,8 +1540,8 @@ fn test_all_seven_languages_parse_minimal_source() {
 
 #[test]
 fn test_c_and_cpp_results_do_not_mix() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let c_fixture = fixtures_dir().join("simple.c");
     let cpp_fixture = fixtures_dir().join("simple.cpp");
@@ -1578,8 +1578,8 @@ fn test_c_and_cpp_results_do_not_mix() {
 
 fn auto_compiled_queries(
     query_str: &str,
-) -> std::collections::HashMap<Language, Arc<dora::query::CompiledQuery>> {
-    dora::parser::get_all_languages()
+) -> std::collections::HashMap<Language, Arc<doora::query::CompiledQuery>> {
+    doora::parser::get_all_languages()
         .into_iter()
         .filter_map(|(lang, ts_lang)| {
             compile_query(&ts_lang, query_str).ok().map(|query| (lang, query))
@@ -1588,8 +1588,8 @@ fn auto_compiled_queries(
 }
 
 fn auto_results(query_str: &str) -> Vec<MatchResult> {
-    use dora::parser::{detect_language, get_all_languages, parse_file};
-    use dora::walker::build_auto_walker;
+    use doora::parser::{detect_language, get_all_languages, parse_file};
+    use doora::walker::build_auto_walker;
 
     let compiled = Arc::new(auto_compiled_queries(query_str));
     let results = Arc::new(Mutex::new(Vec::<MatchResult>::new()));
@@ -1643,7 +1643,7 @@ fn auto_results(query_str: &str) -> Vec<MatchResult> {
 
 #[test]
 fn test_auto_mode_finds_rust_functions() {
-    use dora::parser::get_all_languages;
+    use doora::parser::get_all_languages;
 
     let query_str = "(function_item name: (identifier) @fn_name)";
     let compiled = auto_compiled_queries(query_str);
@@ -1682,7 +1682,7 @@ fn test_auto_mode_finds_multiple_languages() {
 
 #[test]
 fn test_detect_language_no_extension_returns_none() {
-    use dora::parser::detect_language;
+    use doora::parser::detect_language;
 
     assert_eq!(detect_language(Path::new("Makefile")), None);
     assert_eq!(detect_language(Path::new("Dockerfile")), None);
@@ -1720,8 +1720,8 @@ fn test_auto_mode_zero_languages_after_filter() {
 
 #[test]
 fn test_python_nested_closure_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
@@ -1758,8 +1758,8 @@ fn test_python_nested_closure_capture() {
 
 #[test]
 fn test_javascript_arrow_function_params_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("arrow_params.js");
     let lang = get_language("js").unwrap();
@@ -1790,8 +1790,8 @@ fn test_javascript_arrow_function_params_capture() {
 
 #[test]
 fn test_typescript_interface_regex_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("interfaces.ts");
     let lang = get_language("ts").unwrap();
@@ -1820,8 +1820,8 @@ fn test_typescript_interface_regex_predicate() {
 
 #[test]
 fn test_go_struct_exact_match_predicate() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("structs.go");
     let lang = get_language("go").unwrap();
@@ -1848,8 +1848,8 @@ fn test_go_struct_exact_match_predicate() {
 
 #[test]
 fn test_cpp_virtual_keyword_capture() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("virtual_keywords.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1878,8 +1878,8 @@ fn test_cpp_virtual_keyword_capture() {
 
 #[test]
 fn test_cpp_anonymous_destructor_node() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("virtual_keywords.cpp");
     let lang = get_language("cpp").unwrap();
@@ -1995,8 +1995,8 @@ fn test_auto_mode_no_memory_leak_with_mixed_languages() {
 
 #[test]
 fn test_nested_python_closure_line_accuracy() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("nested_closures.py");
     let lang = get_language("python").unwrap();
@@ -2023,8 +2023,8 @@ fn test_nested_python_closure_line_accuracy() {
 
 #[test]
 fn test_typescript_interface_count_with_regex() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("interfaces.ts");
     let lang = get_language("ts").unwrap();
@@ -2055,8 +2055,8 @@ fn test_typescript_interface_count_with_regex() {
 
 #[test]
 fn test_go_struct_selective_extraction() {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let fixture = fixtures_dir().join("structs.go");
     let lang = get_language("go").unwrap();
@@ -2098,8 +2098,8 @@ fn test_go_struct_selective_extraction() {
 }
 
 fn rust_matches(fixture: &Path, query_str: &str) -> Vec<MatchResult> {
-    use dora::parser::{get_language, parse_file};
-    use dora::query::{compile_query, extract_matches};
+    use doora::parser::{get_language, parse_file};
+    use doora::query::{compile_query, extract_matches};
 
     let lang = get_language("rust").unwrap();
     let query = compile_query(&lang, query_str).unwrap();
@@ -2114,7 +2114,10 @@ fn rust_matches(fixture: &Path, query_str: &str) -> Vec<MatchResult> {
 
 fn assert_diff_eq(expected: &str, actual: &str, path: &Path) {
     if expected != actual {
-        panic!("rewrite output differs:\n{}", dora::rewrite::generate_diff(expected, actual, path));
+        panic!(
+            "rewrite output differs:\n{}",
+            doora::rewrite::generate_diff(expected, actual, path)
+        );
     }
 }
 
@@ -2129,11 +2132,11 @@ fn test_rewrite_fixture_alpha_at_file_start() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].start_byte, 3);
 
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "first_function".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "first_function".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
     let source = std::fs::read_to_string(&fixture).unwrap();
 
@@ -2151,11 +2154,11 @@ fn test_rewrite_fixture_omega_at_file_end() {
 
     assert_eq!(results.len(), 1);
 
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "last_fn".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "last_fn".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
     let source = std::fs::read_to_string(&fixture).unwrap();
 
@@ -2178,11 +2181,11 @@ fn test_rewrite_fixture_gamma_multiline() {
     assert_ne!(body.start_line, body.end_line);
 
     let body_result = body.clone();
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &[body_result],
-        &dora::rewrite::RewriteTemplate { raw: "{\n    let changed = true;\n}".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "{\n    let changed = true;\n}".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
     let source = std::fs::read_to_string(&fixture).unwrap();
 
@@ -2200,11 +2203,11 @@ fn test_rewrite_preserves_non_targeted_functions() {
         r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "beta"))"#,
     );
 
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "delta".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "delta".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
 
     assert!(rewritten.contains("fn alpha"));
@@ -2227,11 +2230,11 @@ fn test_rewrite_unicode_fixture_byte_offsets() {
     assert_eq!(results[0].start_byte, source.find("after_unicode").unwrap());
     assert!(results[0].start_byte > source.find("🌍").unwrap());
 
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "post_unicode".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "post_unicode".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
 
     assert!(rewritten.contains("grüßen"));
@@ -2254,11 +2257,11 @@ fn test_rewrite_multi_file_independence() {
         r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "add"))"#,
     ));
 
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "renamed_@fn_name".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "renamed_@fn_name".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
 
     let rewrite_simple = rewritten.get(&rewrite_fixture).unwrap().as_ref().unwrap();
     let simple = rewritten.get(&simple_fixture).unwrap().as_ref().unwrap();
@@ -2277,11 +2280,11 @@ fn test_rewrite_exact_byte_output_matches_expected() {
     );
 
     let source = std::fs::read_to_string(&fixture).unwrap();
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "REPLACED".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "REPLACED".to_string() },
     );
-    let rewritten = dora::rewrite::apply_edits_to_files(&edits);
+    let rewritten = doora::rewrite::apply_edits_to_files(&edits);
     let rewritten = rewritten.get(&fixture).unwrap().as_ref().unwrap();
 
     let mut expected = source.clone();
@@ -2289,7 +2292,7 @@ fn test_rewrite_exact_byte_output_matches_expected() {
     if rewritten != &expected {
         panic!(
             "rewrite output differs from expected:\n{}",
-            dora::rewrite::generate_diff(&expected, rewritten, &fixture)
+            doora::rewrite::generate_diff(&expected, rewritten, &fixture)
         );
     }
 }
@@ -2302,11 +2305,11 @@ fn test_rewrite_dry_run_does_not_modify_fixture() {
         &fixture,
         r#"(function_item name: (identifier) @fn_name (#eq? @fn_name "alpha"))"#,
     );
-    let edits = dora::rewrite::compute_edits(
+    let edits = doora::rewrite::compute_edits(
         &results,
-        &dora::rewrite::RewriteTemplate { raw: "dry_run".to_string() },
+        &doora::rewrite::RewriteTemplate { raw: "dry_run".to_string() },
     );
-    let _ = dora::rewrite::apply_edits_to_files(&edits);
+    let _ = doora::rewrite::apply_edits_to_files(&edits);
     let after = std::fs::read_to_string(&fixture).unwrap();
     assert_eq!(before, after);
 }

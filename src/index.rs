@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{AppError, Result};
 
-pub const INDEX_FILENAME: &str = ".dora-index";
+pub const INDEX_FILENAME: &str = ".doora-index";
 
 pub const INDEX_FORMAT_VERSION: u32 = 1;
 
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_index_path_for_root() {
         let p = index_path_for_root(Path::new("/tmp/myrepo"));
-        assert_eq!(p, PathBuf::from("/tmp/myrepo/.dora-index"));
+        assert_eq!(p, PathBuf::from("/tmp/myrepo/.doora-index"));
     }
 
     #[test]

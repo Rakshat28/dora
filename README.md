@@ -1,14 +1,14 @@
-# dora
+# doora
 
 **Search code the way compilers see it — not the way text editors do.**
 
-[![crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange?style=flat-square)](https://crates.io/crates/dora)
+[![crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange?style=flat-square)](https://crates.io/crates/doora)
 [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
-[![build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/your-org/dora/actions)
+[![build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/backpack-lab/doora/actions)
 [![languages](https://img.shields.io/badge/languages-7-purple?style=flat-square)](#supported-languages)
 [![platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey?style=flat-square)](#installation)
 
-`dora` is a high-performance structural code search engine built on Tree-sitter. It parses source files into `Abstract Syntax` Trees and executes pattern queries against them — finding functions, types, call sites, and structural relationships that text search tools are fundamentally incapable of locating. Unlike grep, which cannot tell the difference between a function named authenticate and a comment that mentions authenticate, `dora` understands your code's grammar. Additionally, `dora` serves as a persistent "Codebase Memory" for AI coding agents. By exposing its structural index via the Model Context Protocol (`MCP`), `LLM`s can execute precise, graph-native queries directly against your codebase, retrieving exact function signatures and dependency relationships without overwhelming their context windows with raw source text.
+`doora` is a high-performance structural code search engine built on Tree-sitter. It parses source files into `Abstract Syntax` Trees and executes pattern queries against them — finding functions, types, call sites, and structural relationships that text search tools are fundamentally incapable of locating. Unlike grep, which cannot tell the difference between a function named authenticate and a comment that mentions authenticate, `doora` understands your code's grammar. Additionally, `doora` serves as a persistent "Codebase Memory" for AI coding agents. By exposing its structural index via the Model Context Protocol (`MCP`), `LLM`s can execute precise, graph-native queries directly against your codebase, retrieving exact function signatures and dependency relationships without overwhelming their context windows with raw source text.
 
 ---
 
@@ -62,9 +62,9 @@ rg "authenticate"
 
 You get every occurrence of those 12 characters — inside function names, variable names, string literals, comments, dead code, documentation, and test fixtures alike. You get everything, and you cannot filter it without writing increasingly fragile regular expressions.
 
-`dora` answers questions that text search cannot:
+`doora` answers questions that text search cannot:
 
-| Question | grep / ripgrep | dora |
+| Question | grep / ripgrep | doora |
 |---|---|---|
 | Find function *definitions* named `authenticate` | Returns all occurrences everywhere | Returns only `function_item` definition nodes |
 | Find functions taking exactly 2 arguments | Cannot be expressed reliably | Trivial — query the parameter list child count |
@@ -73,7 +73,7 @@ You get every occurrence of those 12 characters — inside function names, varia
 | Rename a function at every *definition* site | Risks corrupting string literals and comments | Semantic rewriting via AST — surgical precision |
 | Find all type aliases named `Result` | Returns `Result` everywhere | Returns only `type_alias_declaration` nodes |
 
-The key insight: `dora` is to `grep` what a SQL database is to a flat text file. Both contain the same data; one understands its structure.
+The key insight: `doora` is to `grep` what a SQL database is to a flat text file. Both contain the same data; one understands its structure.
 
 ---
 
@@ -100,43 +100,43 @@ The key insight: `dora` is to `grep` what a SQL database is to a flat text file.
 ### From crates.io
 
 ```bash
-cargo install dora
+cargo install doora
 ```
 
 Requires Rust 1.78 or later.
 
 ### Pre-built binaries
 
-Download from the [Releases page](https://github.com/your-org/dora/releases):
+Download from the [Releases page](https://github.com/backpack-lab/doora/releases):
 
 | Platform | Architecture | Binary |
 |---|---|---|
-| Linux | x86_64 | `dora-x86_64-unknown-linux-gnu` |
-| Linux | aarch64 | `dora-aarch64-unknown-linux-gnu` |
-| macOS | x86_64 | `dora-x86_64-apple-darwin` |
-| macOS | Apple Silicon | `dora-aarch64-apple-darwin` |
-| Windows | x86_64 | `dora-x86_64-pc-windows-msvc.exe` |
+| Linux | x86_64 | `doora-x86_64-unknown-linux-gnu` |
+| Linux | aarch64 | `doora-aarch64-unknown-linux-gnu` |
+| macOS | x86_64 | `doora-x86_64-apple-darwin` |
+| macOS | Apple Silicon | `doora-aarch64-apple-darwin` |
+| Windows | x86_64 | `doora-x86_64-pc-windows-msvc.exe` |
 
 ### From source
 
 ```bash
-git clone https://github.com/your-org/dora
-cd dora
+git clone https://github.com/backpack-lab/doora
+cd doora
 cargo build --release
-# Binary at ./target/release/dora
+# Binary at ./target/release/doora
 ```
 
 ### Shell completions
 
 ```bash
 # Bash
-dora --generate-completions bash >> ~/.bashrc
+doora --generate-completions bash >> ~/.bashrc
 
 # Zsh
-dora --generate-completions zsh >> ~/.zshrc
+doora --generate-completions zsh >> ~/.zshrc
 
 # Fish
-dora --generate-completions fish > ~/.config/fish/completions/dora.fish
+doora --generate-completions fish > ~/.config/fish/completions/doora.fish
 ```
 
 ---
@@ -145,34 +145,34 @@ dora --generate-completions fish > ~/.config/fish/completions/dora.fish
 
 ```bash
 # Find all Rust function definitions in ./src
-dora -q '(function_item name: (identifier) @fn_name)' -p ./src
+doora -q '(function_item name: (identifier) @fn_name)' -p ./src
 
 # Find a specific function by name
-dora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src
+doora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src
 
 # Search Python files
-dora -q '(function_definition name: (identifier) @fn)' -p . --lang python
+doora -q '(function_definition name: (identifier) @fn)' -p . --lang python
 
 # Auto-detect language per file — search everything at once
-dora -q '(function_declaration name: (identifier) @fn_name)' -p .
+doora -q '(function_declaration name: (identifier) @fn_name)' -p .
 
 # Multiple queries in a single tree-traversal pass
-dora \
+doora \
   -q '(function_item name: (identifier) @fn_name)' \
   -q '(struct_item name: (type_identifier) @struct_name)' \
   -p ./src --no-color
 
 # Build a Bloom filter index for faster searches
-dora index ./src
+doora index ./src
 
 # Build both Bloom filter and persistent SQLite symbol index
-dora index ./src --persist
+doora index ./src --persist
 
 # Look up a symbol by name in the persistent index
-dora lookup --symbol parse_file --path ./src
+doora lookup --symbol parse_file --path ./src
 
 # Launch the interactive TUI
-dora -q '(function_item name: (identifier) @fn)' -p . --tui
+doora -q '(function_item name: (identifier) @fn)' -p . --tui
 ```
 
 **Example output:**
@@ -191,10 +191,10 @@ Found 47 matches across 23 files in 38ms
 
 ### search command (default)
 
-When no subcommand is given, `dora` runs a structural search.
+When no subcommand is given, `doora` runs a structural search.
 
 ```
-dora [search] [OPTIONS] --query <S-EXPR>
+doora [search] [OPTIONS] --query <S-EXPR>
 ```
 
 | Flag | Type | Default | Description |
@@ -253,7 +253,7 @@ index updated:    3 entries
 Builds or updates the Bloom filter index and optionally the persistent SQLite structural index.
 
 ```
-dora index <PATH> [OPTIONS]
+doora index <PATH> [OPTIONS]
 ```
 
 | Flag | Type | Default | Description |
@@ -263,17 +263,17 @@ dora index <PATH> [OPTIONS]
 | `--persist` | bool | false | Also extract symbols and insert into the SQLite structural index. |
 | `--verbose` | bool | false | Print one line per file: `indexed:`, `fresh:`, or `removed:`. |
 
-The Bloom filter index is stored at `<PATH>/.dora-index` (bincode format).
-The SQLite structural index is stored at `<PATH>/.dora-memory.db`.
+The Bloom filter index is stored at `<PATH>/.doora-index` (bincode format).
+The SQLite structural index is stored at `<PATH>/.doora-memory.db`.
 
 Both indexes are updated incrementally — files whose mtime and size match the stored entry are skipped.
 
 ```bash
 # Build Bloom filter index only
-dora index ./src
+doora index ./src
 
 # Build both indexes with verbose output
-dora index ./src --persist --verbose
+doora index ./src --persist --verbose
 ```
 
 ```
@@ -283,7 +283,7 @@ fresh:   src/main.rs
 removed: src/old/legacy.rs
 
 indexed 44 files, skipped 2 fresh, removed 1 stale entries, extracted 312 symbols
-index written to .dora-index
+index written to .doora-index
 ```
 
 ---
@@ -293,7 +293,7 @@ index written to .dora-index
 Queries the persistent SQLite structural index for symbols by name, prefix, kind, or language.
 
 ```
-dora lookup [OPTIONS]
+doora lookup [OPTIONS]
 ```
 
 | Flag | Type | Default | Description |
@@ -320,16 +320,16 @@ Found 1 symbol in 1 file in 2ms
 
 ```bash
 # Look up an exact function name
-dora lookup --symbol authenticate --path ./src
+doora lookup --symbol authenticate --path ./src
 
 # Find all symbols starting with "handle_"
-dora lookup --prefix handle_ --path ./src
+doora lookup --prefix handle_ --path ./src
 
 # Find all structs
-dora lookup --prefix "" --kind struct --path ./src
+doora lookup --prefix "" --kind struct --path ./src
 
 # Find Rust functions only (in a mixed-language repo)
-dora lookup --prefix connect --kind function --lang rust --path .
+doora lookup --prefix connect --kind function --lang rust --path .
 ```
 
 ---
@@ -339,7 +339,7 @@ dora lookup --prefix connect --kind function --lang rust --path .
 Starts an MCP (Model Context Protocol) server that exposes the structural index to LLM coding agents.
 
 ```
-dora serve --mcp [OPTIONS]
+doora serve --mcp [OPTIONS]
 ```
 
 | Flag | Type | Default | Description |
@@ -352,7 +352,7 @@ See [MCP Server for AI Agents](#mcp-server-for-ai-agents) for full setup instruc
 
 ## Query Syntax Guide
 
-`dora` uses Tree-sitter's S-expression pattern syntax. An S-expression is a Lisp-like notation that mirrors the shape of the syntax tree.
+`doora` uses Tree-sitter's S-expression pattern syntax. An S-expression is a Lisp-like notation that mirrors the shape of the syntax tree.
 
 ### Basics
 
@@ -452,7 +452,7 @@ Matches function names starting with `get_`, `set_`, or `update_`. The regex is 
 Pass multiple `-q` flags to run several queries in a single tree traversal. The AST is walked exactly once per file regardless of query count:
 
 ```bash
-dora \
+doora \
   -q '(function_item name: (identifier) @fn_name)' \
   -q '(struct_item name: (type_identifier) @struct_name)' \
   -q '(enum_item name: (type_identifier) @enum_name)' \
@@ -469,80 +469,80 @@ Results from all queries are merged, sorted by file and position, and deduplicat
 
 ```bash
 # All function definitions
-dora -q '(function_item name: (identifier) @fn_name)' -p ./src
+doora -q '(function_item name: (identifier) @fn_name)' -p ./src
 
 # A specific function
-dora -q '(function_item name: (identifier) @fn (#eq? @fn "authenticate"))' -p .
+doora -q '(function_item name: (identifier) @fn (#eq? @fn "authenticate"))' -p .
 
 # All functions matching a naming pattern
-dora -q '(function_item name: (identifier) @fn (#match? @fn "^handle_"))' -p ./src
+doora -q '(function_item name: (identifier) @fn (#match? @fn "^handle_"))' -p ./src
 
 # All struct definitions
-dora -q '(struct_item name: (type_identifier) @struct_name)' -p ./src
+doora -q '(struct_item name: (type_identifier) @struct_name)' -p ./src
 
 # All enum definitions
-dora -q '(enum_item name: (type_identifier) @enum_name)' -p ./src
+doora -q '(enum_item name: (type_identifier) @enum_name)' -p ./src
 
 # All trait definitions
-dora -q '(trait_item name: (type_identifier) @trait_name)' -p ./src
+doora -q '(trait_item name: (type_identifier) @trait_name)' -p ./src
 
 # All impl blocks for a specific type
-dora \
+doora \
   -q '(impl_item type: (type_identifier) @t (#eq? @t "Config"))' \
   -p ./src
 
 # All trait implementations (impl Trait for Type)
-dora \
+doora \
   -q '(impl_item trait: (type_identifier) @trait type: (type_identifier) @type)' \
   -p ./src
 
 # All .unwrap() call sites
-dora \
+doora \
   -q '(call_expression function: (field_expression field: (field_identifier) @m (#eq? @m "unwrap")))' \
   -p ./src
 
 # All use declarations (imports)
-dora -q '(use_declaration) @import' -p ./src
+doora -q '(use_declaration) @import' -p ./src
 
 # Functions returning a specific type
-dora \
+doora \
   -q '(function_item return_type: (generic_type type: (type_identifier) @t (#eq? @t "Result")) @fn)' \
   -p ./src
 
 # All type aliases
-dora -q '(type_item name: (type_identifier) @alias_name)' -p ./src
+doora -q '(type_item name: (type_identifier) @alias_name)' -p ./src
 
 # Constants
-dora -q '(const_item name: (identifier) @const_name)' -p ./src
+doora -q '(const_item name: (identifier) @const_name)' -p ./src
 ```
 
 ### Python
 
 ```bash
 # All function definitions
-dora -q '(function_definition name: (identifier) @fn_name)' -p . --lang python
+doora -q '(function_definition name: (identifier) @fn_name)' -p . --lang python
 
 # Test functions only
-dora \
+doora \
   -q '(function_definition name: (identifier) @fn (#match? @fn "^test_"))' \
   -p . --lang python
 
 # Class definitions
-dora -q '(class_definition name: (identifier) @class_name)' -p . --lang python
+doora -q '(class_definition name: (identifier) @class_name)' -p . --lang python
 
 # Decorated functions (e.g. @property, @staticmethod, @app.route)
-dora \
+doora \
   -q '(decorated_definition
         decorator: (decorator) @dec
         definition: (function_definition name: (identifier) @fn_name))' \
   -p . --lang python
 
 # Import statements
-dora -q '(import_statement) @import' -p . --lang python
-dora -q '(import_from_statement) @from_import' -p . --lang python
+doora -q '(import_statement) @import' -p . --lang python
+doora -q '(import_from_statement) @from_import' -p . --lang python
 
 # Class methods
-dora \
+doora \
   -q '(class_definition
         body: (block
           (function_definition name: (identifier) @method_name)))' \
@@ -553,16 +553,16 @@ dora \
 
 ```bash
 # Function declarations
-dora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang js
+doora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang js
 
 # Class declarations
-dora -q '(class_declaration name: (identifier) @class_name)' -p . --lang js
+doora -q '(class_declaration name: (identifier) @class_name)' -p . --lang js
 
 # Method definitions
-dora -q '(method_definition name: (property_identifier) @method_name)' -p . --lang js
+doora -q '(method_definition name: (property_identifier) @method_name)' -p . --lang js
 
 # Arrow functions assigned to const
-dora \
+doora \
   -q '(lexical_declaration
         (variable_declarator
           name: (identifier) @fn_name
@@ -570,10 +570,10 @@ dora \
   -p . --lang js
 
 # Import declarations
-dora -q '(import_declaration) @import' -p . --lang js
+doora -q '(import_declaration) @import' -p . --lang js
 
 # Specific function
-dora \
+doora \
   -q '(function_declaration name: (identifier) @fn (#eq? @fn "authenticate"))' \
   -p . --lang js
 ```
@@ -582,50 +582,50 @@ dora \
 
 ```bash
 # Function declarations
-dora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang ts
+doora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang ts
 
 # Interface declarations
-dora -q '(interface_declaration name: (type_identifier) @interface_name)' -p . --lang ts
+doora -q '(interface_declaration name: (type_identifier) @interface_name)' -p . --lang ts
 
 # Type aliases
-dora -q '(type_alias_declaration name: (type_identifier) @type_name)' -p . --lang ts
+doora -q '(type_alias_declaration name: (type_identifier) @type_name)' -p . --lang ts
 
 # Class declarations
-dora -q '(class_declaration name: (identifier) @class_name)' -p . --lang ts
+doora -q '(class_declaration name: (identifier) @class_name)' -p . --lang ts
 
 # Enum declarations
-dora -q '(enum_declaration name: (identifier) @enum_name)' -p . --lang ts
+doora -q '(enum_declaration name: (identifier) @enum_name)' -p . --lang ts
 
 # Import declarations
-dora -q '(import_declaration) @import' -p . --lang ts
+doora -q '(import_declaration) @import' -p . --lang ts
 
 # Generic functions
-dora \
+doora \
   -q '(function_declaration
         name: (identifier) @fn_name
         type_parameters: (type_parameters))' \
   -p . --lang ts
 
 # TSX component definitions (functions returning JSX)
-dora -q '(function_declaration name: (identifier) @component)' -p . --lang ts
+doora -q '(function_declaration name: (identifier) @component)' -p . --lang ts
 ```
 
 ### Go
 
 ```bash
 # Function declarations (not methods)
-dora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang go
+doora -q '(function_declaration name: (identifier) @fn_name)' -p . --lang go
 
 # Method declarations (with receiver)
-dora -q '(method_declaration name: (field_identifier) @method_name)' -p . --lang go
+doora -q '(method_declaration name: (field_identifier) @method_name)' -p . --lang go
 
 # Struct type declarations
-dora \
+doora \
   -q '(type_declaration (type_spec name: (type_identifier) @type_name))' \
   -p . --lang go
 
 # Interface type declarations
-dora \
+doora \
   -q '(type_declaration
         (type_spec
           name: (type_identifier) @interface_name
@@ -633,10 +633,10 @@ dora \
   -p . --lang go
 
 # Import declarations
-dora -q '(import_declaration) @import' -p . --lang go
+doora -q '(import_declaration) @import' -p . --lang go
 
 # Functions with a specific receiver type
-dora \
+doora \
   -q '(method_declaration
         receiver: (parameter_list
           (parameter_declaration type: (type_identifier) @recv (#eq? @recv "Config")))
@@ -648,56 +648,56 @@ dora \
 
 ```bash
 # Function definitions
-dora \
+doora \
   -q '(function_definition
         declarator: (function_declarator
           declarator: (identifier) @fn_name))' \
   -p . --lang c
 
 # Typedef names
-dora -q '(type_definition declarator: (type_identifier) @type_name)' -p . --lang c
+doora -q '(type_definition declarator: (type_identifier) @type_name)' -p . --lang c
 
 # Struct declarations
-dora -q '(struct_specifier name: (type_identifier) @struct_name)' -p . --lang c
+doora -q '(struct_specifier name: (type_identifier) @struct_name)' -p . --lang c
 
 # A specific function
-dora \
+doora \
   -q '(function_definition
         declarator: (function_declarator
           declarator: (identifier) @fn (#eq? @fn "main")))' \
   -p . --lang c
 
 # Include directives
-dora -q '(preproc_include) @include' -p . --lang c
+doora -q '(preproc_include) @include' -p . --lang c
 
 # Macro definitions
-dora -q '(preproc_def name: (identifier) @macro_name)' -p . --lang c
+doora -q '(preproc_def name: (identifier) @macro_name)' -p . --lang c
 ```
 
 ### C++
 
 ```bash
 # Function definitions (free functions)
-dora \
+doora \
   -q '(function_definition
         declarator: (function_declarator
           declarator: (identifier) @fn_name))' \
   -p . --lang cpp
 
 # Class declarations
-dora -q '(class_specifier name: (type_identifier) @class_name)' -p . --lang cpp
+doora -q '(class_specifier name: (type_identifier) @class_name)' -p . --lang cpp
 
 # Struct declarations
-dora -q '(struct_specifier name: (type_identifier) @struct_name)' -p . --lang cpp
+doora -q '(struct_specifier name: (type_identifier) @struct_name)' -p . --lang cpp
 
 # Template declarations
-dora -q '(template_declaration) @template' -p . --lang cpp
+doora -q '(template_declaration) @template' -p . --lang cpp
 
 # Namespace declarations
-dora -q '(namespace_definition name: (namespace_identifier) @ns_name)' -p . --lang cpp
+doora -q '(namespace_definition name: (namespace_identifier) @ns_name)' -p . --lang cpp
 
 # Constructor definitions
-dora \
+doora \
   -q '(function_definition
         declarator: (function_declarator
           declarator: (qualified_identifier) @ctor_name))' \
@@ -706,18 +706,18 @@ dora \
 
 ### Auto-detection
 
-When `--lang auto` is used (the default), `dora` detects the grammar per file from its extension and walks all supported extensions simultaneously. The query is compiled against every grammar at startup — grammars for which the query fails to compile are silently skipped.
+When `--lang auto` is used (the default), `doora` detects the grammar per file from its extension and walks all supported extensions simultaneously. The query is compiled against every grammar at startup — grammars for which the query fails to compile are silently skipped.
 
 ```bash
 # Search all source files — auto-detects language per file
 # function_declaration compiles for JS, TS, Go, C, C++ — not Rust or Python
-dora -q '(function_declaration name: (identifier) @fn_name)' -p .
+doora -q '(function_declaration name: (identifier) @fn_name)' -p .
 
 # function_item only exists in Rust — auto mode searches only .rs files
-dora -q '(function_item name: (identifier) @fn_name)' -p .
+doora -q '(function_item name: (identifier) @fn_name)' -p .
 
 # identifier exists in every grammar — auto mode searches everything
-dora -q '(identifier) @id' -p . --quiet
+doora -q '(identifier) @id' -p . --quiet
 ```
 
 **Extension mapping:**
@@ -752,10 +752,10 @@ The Bloom filter index is a pre-parse rejection sieve. Files that *mathematicall
 
 ```bash
 # Build the Bloom filter index
-dora index ./src
+doora index ./src
 
 # Rebuild verbosely
-dora index ./src --verbose
+doora index ./src --verbose
 ```
 
 ### How the search uses it
@@ -764,12 +764,12 @@ The search pipeline automatically loads and uses the index when it exists:
 
 ```bash
 # First search (no index): parses all 47 files
-dora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src
+doora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src
 # Found 1 match across 47 files in 156ms
 
 # After building the index: most files skipped
-dora index ./src
-dora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src --stats
+doora index ./src
+doora -q '(function_item name: (identifier) @fn (#eq? @fn "connect"))' -p ./src --stats
 # sieve rejected: 41  ← 41 files skipped before parsing
 # Found 1 match across 6 files in 23ms
 ```
@@ -780,15 +780,15 @@ The index updates incrementally during search — stale entries for modified fil
 
 ## The Persistent Structural Index
 
-Beyond the Bloom filter, `dora` can build a full SQLite database of all symbols in your codebase — function definitions, struct definitions, type aliases, import statements, trait implementations, and more. This is the **persistent structural index**.
+Beyond the Bloom filter, `doora` can build a full SQLite database of all symbols in your codebase — function definitions, struct definitions, type aliases, import statements, trait implementations, and more. This is the **persistent structural index**.
 
 ### Building it
 
 ```bash
-dora index ./src --persist
+doora index ./src --persist
 ```
 
-This extracts symbols from every file and inserts them into `.dora-memory.db`. The schema:
+This extracts symbols from every file and inserts them into `.doora-memory.db`. The schema:
 
 ```sql
 -- One row per indexed file
@@ -804,19 +804,19 @@ Supported symbol kinds: `function`, `method`, `struct`, `enum`, `trait`, `interf
 
 ```bash
 # Exact name lookup
-dora lookup --symbol authenticate --path ./src
+doora lookup --symbol authenticate --path ./src
 
 # Prefix search
-dora lookup --prefix handle_ --path ./src
+doora lookup --prefix handle_ --path ./src
 
 # Filter by kind
-dora lookup --prefix "" --kind struct --path ./src
+doora lookup --prefix "" --kind struct --path ./src
 
 # Filter by language in a mixed-language repo
-dora lookup --prefix connect --lang rust --path .
+doora lookup --prefix connect --lang rust --path .
 
 # Find all functions whose name matches a pattern (prefix)
-dora lookup --prefix parse_ --kind function --path ./src
+doora lookup --prefix parse_ --kind function --path ./src
 ```
 
 **Output:**
@@ -837,12 +837,12 @@ The lookup command is significantly faster than structural search for name-based
 
 ## Semantic Rewriting
 
-`dora` can surgically rewrite code by replacing structural patterns without touching surrounding syntax. This is fundamentally safer than `sed` — it targets only AST nodes matching the query, never string literals or comments that happen to contain the same text.
+`doora` can surgically rewrite code by replacing structural patterns without touching surrounding syntax. This is fundamentally safer than `sed` — it targets only AST nodes matching the query, never string literals or comments that happen to contain the same text.
 
 ### Dry run (default)
 
 ```bash
-dora \
+doora \
   -q '(function_item name: (identifier) @fn_name (#eq? @fn_name "old_name"))' \
   --rewrite 'new_name' \
   -p ./src
@@ -854,14 +854,14 @@ Prints a colored unified diff without modifying any files.
 
 ```bash
 # Shows diff, prompts for confirmation
-dora \
+doora \
   -q '(function_item name: (identifier) @fn_name (#eq? @fn_name "old_name"))' \
   --rewrite 'new_name' \
   --in-place \
   -p ./src
 
 # Skip confirmation prompt
-dora \
+doora \
   -q '(function_item name: (identifier) @fn_name (#eq? @fn_name "old_name"))' \
   --rewrite 'new_name' \
   --in-place --yes \
@@ -877,7 +877,7 @@ Use `@capture_name` in the template to substitute captured text:
 --rewrite 'renamed_@fn_name'
 
 # Prefix all test functions
-dora \
+doora \
   -q '(function_item name: (identifier) @fn (#match? @fn "^test_"))' \
   --rewrite 'legacy_@fn' \
   -p ./src
@@ -894,7 +894,7 @@ Rewrites are applied in **reverse byte order** — edits at the end of a file ar
 Launch the interactive terminal UI with `--tui` for a split-pane explorer with live streaming results:
 
 ```bash
-dora -q '(function_item)' -p . --tui
+doora -q '(function_item)' -p . --tui
 ```
 
 ```
@@ -938,13 +938,13 @@ dora -q '(function_item)' -p . --tui
 
 ## MCP Server for AI Agents
 
-`dora` exposes a [Model Context Protocol](https://modelcontextprotocol.io) server so LLM coding agents (Claude Code, Continue, Cursor, etc.) can query your codebase structurally.
+`doora` exposes a [Model Context Protocol](https://modelcontextprotocol.io) server so LLM coding agents (Claude Code, Continue, Cursor, etc.) can query your codebase structurally.
 
 ### Why LLMs need structural search
 
 LLM coding agents have limited context windows. When an agent tries to understand a large codebase by reading files via `grep` or raw file reads, it burns context tokens on irrelevant content and still has no structural understanding of the architecture.
 
-With the `dora` MCP server, an agent can ask:
+With the `doora` MCP server, an agent can ask:
 
 > *"What is the exact type signature of the function handling user authentication?"*
 
@@ -955,13 +955,13 @@ and receive a precise, structured answer in milliseconds — using a fraction of
 **Step 1: Build the persistent index**
 
 ```bash
-dora index --persist /path/to/your/repo
+doora index --persist /path/to/your/repo
 ```
 
 **Step 2: Start the MCP server**
 
 ```bash
-dora serve --mcp
+doora serve --mcp
 ```
 
 **Step 3: Configure your MCP client**
@@ -971,8 +971,8 @@ Add to your `.mcp.json` (or equivalent client configuration):
 ```json
 {
   "mcpServers": {
-    "dora": {
-      "command": "dora",
+    "doora": {
+      "command": "doora",
       "args": ["serve", "--mcp"],
       "cwd": "/path/to/your/repo"
     }
@@ -1015,14 +1015,14 @@ Returns `SymbolRow` objects including the symbol kind, file path, position, and 
 Instead of:
 > Agent reads 15 files to find where authentication is handled, burning 12,000 tokens
 
-With dora MCP:
+With doora MCP:
 > Agent calls `lookup_symbol("authenticate")` → receives 2 results with signatures in <5ms, uses 150 tokens
 
 ---
 
 ## Performance
 
-`dora` is engineered for sub-second query latency on repositories with millions of lines of code.
+`doora` is engineered for sub-second query latency on repositories with millions of lines of code.
 
 ### Benchmark results
 
@@ -1041,11 +1041,11 @@ With dora MCP:
 | Tool | Type | 10k-file Rust repo | Accuracy |
 |---|---|---|---|
 | `ripgrep` | Text (regex) | ~9ms | Many false positives |
-| `dora` (no index) | Structural | ~380ms | Zero false positives |
-| `dora` (with index) | Structural + sieve | ~85ms | Zero false positives |
-| `dora lookup` | SQLite index | <2ms | Exact symbol match |
+| `doora` (no index) | Structural | ~380ms | Zero false positives |
+| `doora` (with index) | Structural + sieve | ~85ms | Zero false positives |
+| `doora lookup` | SQLite index | <2ms | Exact symbol match |
 
-`dora` without an index is ~40× slower than `ripgrep` because it does fundamentally more work — it parses every file into a full syntax tree. With the Bloom filter index, that gap narrows to ~9× for queries with string literal predicates. For symbol lookups via the SQLite index, it is faster than ripgrep.
+`doora` without an index is ~40× slower than `ripgrep` because it does fundamentally more work — it parses every file into a full syntax tree. With the Bloom filter index, that gap narrows to ~9× for queries with string literal predicates. For symbol lookups via the SQLite index, it is faster than ripgrep.
 
 ### Why it's fast
 
@@ -1122,8 +1122,8 @@ WalkBuilder → file paths → par_bridge() (Rayon)               │
 **Prerequisites:** Rust 1.78+, a C compiler (for Tree-sitter grammar compilation)
 
 ```bash
-git clone https://github.com/your-org/dora
-cd dora
+git clone https://github.com/backpack-lab/doora
+cd doora
 
 # Debug build
 cargo build
@@ -1162,7 +1162,7 @@ cargo fmt
 
 ## Contributing
 
-Contributions are welcome. The project is tracked issue-by-issue across 15 milestones. See the [open issues](https://github.com/your-org/dora/issues) for the full roadmap.
+Contributions are welcome. The project is tracked issue-by-issue across 15 milestones. See the [open issues](https://github.com/backpack-lab/doora/issues) for the full roadmap.
 
 **Before opening a PR:**
 

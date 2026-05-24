@@ -7,15 +7,15 @@ install-flamegraph:
 	cargo install flamegraph
 
 flamegraph:
-	cargo flamegraph --bin dora -- \
+	cargo flamegraph --bin doora -- \
 		-q '(function_item name: (identifier) @fn_name)' \
-		-p /tmp/dora-profile-fixture \
+		-p /tmp/doora-profile-fixture \
 		--lang rust --no-color --quiet
 
 baseline:
 	@echo "measuring baseline on fixture repo..."
-	@time ./target/release/dora \
+	@time ./target/release/doora \
 		-q '(function_item name: (identifier) @fn_name)' \
-		-p /tmp/dora-profile-fixture \
+		-p /tmp/doora-profile-fixture \
 		--lang rust --no-color --quiet \
 		2>/dev/null | wc -l

@@ -234,7 +234,7 @@ fn search_ast(config: &McpConfig, query: &str) -> Result<Vec<SearchAstItem>> {
 fn lookup_symbol(config: &McpConfig, name: &str) -> Result<Vec<LookupSymbolItem>> {
     if !config.db_path.exists() {
         return Err(AppError::DbError(format!(
-            "no structural index found at {}\n  hint: run dora --persist {} first",
+            "no structural index found at {}\n  hint: run doora --persist {} first",
             config.db_path.display(),
             config.root_path.display()
         )));

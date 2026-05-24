@@ -74,20 +74,20 @@ fn handle_file_error(error: &FileError, skip_count: &Mutex<usize>) {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "dora",
+    name = "doora",
     version,
     author,
     about = "Structural AST-based code search — find code by shape, not by text.",
-    long_about = "dora parses source files into Abstract Syntax Trees and \
+    long_about = "doora parses source files into Abstract Syntax Trees and \
                   executes structural pattern queries against them.\n\n\
-                  Unlike grep or ripgrep, dora understands code grammar. \
+                  Unlike grep or ripgrep, doora understands code grammar. \
                   It can find function definitions, not just strings that look \
                   like them. It ignores matches inside comments, string literals, \
                   and dead code.\n\n\
                   Queries use Tree-sitter S-expression syntax:\n\
                   \n  \
-                  dora -q '(function_item name: (identifier) @fn)' -p ./src\n\n\
-                  See https://github.com/your-org/dora for full documentation."
+                  doora -q '(function_item name: (identifier) @fn)' -p ./src\n\n\
+                  See https://github.com/your-org/doora for full documentation."
 )]
 struct App {
     #[command(flatten)]
@@ -374,7 +374,7 @@ fn open_lookup_db(root: &Path) -> std::result::Result<MemoryDb, String> {
     let db_path = lookup_db_path(root);
     if !db_path.exists() {
         return Err(format!(
-            "no structural index found at {}\n  hint: run dora --persist {} first",
+            "no structural index found at {}\n  hint: run doora --persist {} first",
             db_path.display(),
             root.display()
         ));
@@ -892,7 +892,7 @@ fn main() {
 
     if let Some(shell) = cli.generate_completions {
         let mut cmd = App::command();
-        generate(shell, &mut cmd, "dora", &mut std::io::stdout());
+        generate(shell, &mut cmd, "doora", &mut std::io::stdout());
         process::exit(0);
     }
 
@@ -991,9 +991,9 @@ fn run_rewrite_mode(
 ) {
     use std::io::{self, BufRead};
 
-    let rewrite_results: Vec<dora::types::MatchResult> = results
+    let rewrite_results: Vec<doora::types::MatchResult> = results
         .into_iter()
-        .map(|result| dora::types::MatchResult {
+        .map(|result| doora::types::MatchResult {
             file_path: result.file_path,
             start_line: result.start_line,
             start_col: result.start_col,
@@ -1006,20 +1006,20 @@ fn run_rewrite_mode(
         })
         .collect();
 
-    let tmpl = dora::rewrite::RewriteTemplate { raw: template.to_string() };
-    let edits = dora::rewrite::compute_edits(&rewrite_results, &tmpl);
+    let tmpl = doora::rewrite::RewriteTemplate { raw: template.to_string() };
+    let edits = doora::rewrite::compute_edits(&rewrite_results, &tmpl);
     if edits.is_empty() {
         eprintln!("No changes would be made.");
         return;
     }
 
-    let all: HashMap<_, _> = dora::rewrite::apply_edits_to_files(&edits);
+    let all: HashMap<_, _> = doora::rewrite::apply_edits_to_files(&edits);
 
     for (path, result) in &all {
         match result {
             Ok(rewritten) => match std::fs::read_to_string(path) {
                 Ok(original) => {
-                    let diff = dora::rewrite::generate_diff(&original, rewritten, path);
+                    let diff = doora::rewrite::generate_diff(&original, rewritten, path);
                     if diff.is_empty() {
                         continue;
                     }
@@ -1086,7 +1086,7 @@ fn run_rewrite_mode(
         let mut error_count = 0usize;
         for (path, result) in &all {
             match result {
-                Ok(content) => match dora::rewrite::write_atomically(path, content) {
+                Ok(content) => match doora::rewrite::write_atomically(path, content) {
                     Ok(()) => {
                         eprintln!("  rewritten: {}", path.display());
                         rewritten_count += 1;
@@ -1250,7 +1250,7 @@ mod tests {
     #[test]
     fn test_cli_validate_nonexistent_path() {
         let cli = Cli {
-            path: PathBuf::from("/tmp/dora_nonexistent_xyz_12345"),
+            path: PathBuf::from("/tmp/doora_nonexistent_xyz_12345"),
             query: vec!["(function_item)".to_string()],
             lang: "rust".to_string(),
             no_color: false,
@@ -1267,7 +1267,7 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
         assert!(err_msg.contains("does not exist"));
-        assert!(err_msg.contains("dora_nonexistent_xyz_12345"));
+        assert!(err_msg.contains("doora_nonexistent_xyz_12345"));
     }
 
     #[test]
@@ -1374,7 +1374,7 @@ mod tests {
             symbol: Some("foo".to_string()),
             prefix: None,
             kind: None,
-            path: PathBuf::from("/tmp/dora_lookup_missing_dir_12345"),
+            path: PathBuf::from("/tmp/doora_lookup_missing_dir_12345"),
             lang: "auto".to_string(),
             no_color: false,
         };
@@ -1835,7 +1835,7 @@ mod tests {
     fn test_validate_rejects_nonexistent_path_with_hint() {
         let cli = Cli {
             query: vec!["(fn)".to_string()],
-            path: PathBuf::from("/tmp/dora_nonexistent_xyz_99999"),
+            path: PathBuf::from("/tmp/doora_nonexistent_xyz_99999"),
             lang: "rust".to_string(),
             no_color: false,
             quiet: false,
@@ -1851,7 +1851,7 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(msg.contains("does not exist"));
-        assert!(msg.contains("dora_nonexistent_xyz_99999"));
+        assert!(msg.contains("doora_nonexistent_xyz_99999"));
         assert!(msg.contains("hint:"));
     }
 

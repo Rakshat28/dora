@@ -1,6 +1,6 @@
-use dora::bloom::{BloomFilter, BLOOM_BITS};
-use dora::sieve::{build_query_trigram_set, should_parse_file};
-use dora::trigram::extract_unique_trigrams_from_bytes;
+use doora::bloom::{BloomFilter, BLOOM_BITS};
+use doora::sieve::{build_query_trigram_set, should_parse_file};
+use doora::trigram::extract_unique_trigrams_from_bytes;
 use std::collections::HashSet;
 
 fn generate_fixture_file(index: usize) -> String {
